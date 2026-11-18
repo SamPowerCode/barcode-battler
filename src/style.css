@@ -249,6 +249,7 @@ kbd { font: 600 12px var(--f-body); padding: 1px 6px; border: 1px solid var(--li
 
 /* ---------- battle a friend ---------- */
 .btn.friend { width: 100%; max-width: 360px; height: 48px; font-size: 16px; border-radius: 14px; }
+.btn.friend.rematch { background: var(--shell); color: #FFFFFF; }
 body.sheet-open { overflow: hidden; }
 .sheet {
   position: fixed; inset: 0; z-index: 90; background: rgba(20, 22, 38, 0.55);

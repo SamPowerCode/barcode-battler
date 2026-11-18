@@ -6,7 +6,9 @@ import {
 } from './game.js';
 import { drawSprite, drawBars, LCD_INK } from './draw.js';
 import { openScanner, detectInImage } from './scanner.js';
-import { PROTOCOL, other, parseRoom, fighterFromWire, makePvpState, pvpStep, sanitizeState } from './pvp.js';
+import {
+  PROTOCOL, other, parseRoom, fighterFromWire, makePvpState, pvpStep, sanitizeState, isNewerState,
+} from './pvp.js';
 import { hostRoom, joinRoom, linkErrorText } from './link.js';
 
 registerSW({ immediate: true });
@@ -140,13 +142,17 @@ function scrBattle() {
 function scrResult() {
   lcd.classList.add('center');
   const r = S.result;
+  const linked = S.pvp?.phase === 'post';
+  let vsLine = r.pvp ? 'VS FRIEND' : '';
+  if (linked && S.pvp.myAgain) vsLine = 'WAITING FOR FRIEND...';
+  else if (linked && S.pvp.peerAgain) vsLine = 'FRIEND WANTS A REMATCH!';
   lcd.innerHTML = `
     <div class="t52">${r.win ? 'YOU WIN!' : 'YOU LOSE'}</div>
     <canvas class="spr" id="sView"></canvas>
-    ${r.pvp ? '<div class="t16">VS FRIEND</div>' : ''}
+    ${vsLine ? `<div class="t16">${vsLine}</div>` : ''}
     <div class="t20">${r.win ? 'BEAT' : 'LOST TO'} ${r.foe}</div>
     <div class="t22">+${r.gain} XP${r.to > r.from ? `  LV ${r.from} &gt; ${r.to}` : ''}</div>
-    <div class="t16 blink">PRESS A</div>`;
+    <div class="t16${linked && S.pvp.myAgain ? '' : ' blink'}">${linked ? 'A:REMATCH  B:QUIT' : 'PRESS A'}</div>`;
   drawSprite($('#sView'), S.roster[S.active].shape, 6);
 }
 
@@ -307,6 +313,11 @@ function press(k) {
       }
       break;
     case 'result':
+      if (S.pvp?.phase === 'post') {
+        if (k === 'A') requestRematch();
+        else if (k === 'B') leavePvp();
+        return;
+      }
       if (k === 'A' || k === 'B') { S.view = S.active; S.tag = null; S.screen = 'reveal'; beep(660); }
       break;
     case 'notice':
@@ -624,13 +635,21 @@ function beginPvp(role, conn, idx) {
   clearTimeout(S.timer);
   S.battle = null;
   S.power = true;
-  S.pvp = { role, conn, handle, idx, state: null, lastSeq: -1, finished: false, waiting: false };
+  S.pvp = {
+    role, conn, handle, idx, state: null, lastSeq: -1, finished: false, waiting: false,
+    phase: 'battle', round: 0, myAgain: false, peerAgain: null, closed: false,
+  };
   S.active = S.view = idx;
   S.itemSel = 0;
   save(); renderRoster();
+  const onGone = () => {
+    if (S.pvp?.conn !== conn) return;
+    S.pvp.closed = true;
+    linkLost(false);
+  };
   conn.on('data', onLinkData);
-  conn.on('close', () => linkLost(false));
-  conn.on('error', () => linkLost(false));
+  conn.on('close', onGone);
+  conn.on('error', onGone);
   const me = S.roster[idx];
   if (role === 'guest') conn.send({ t: 'hello', v: PROTOCOL, code: me.code, lv: me.lv });
   S.notice = { title: 'LINKED!', lines: [role === 'host' ? 'FRIEND JOINED' : 'CONNECTED', 'GET READY...'], hint: '' };
@@ -646,6 +665,20 @@ function onLinkData(msg) {
   const p = S.pvp;
   if (!p || !msg || typeof msg !== 'object') return;
   if (msg.t === 'bye') { linkLost(true, msg.reason); return; }
+  if (msg.t === 'again') {
+    if (p.phase !== 'post' && !p.finished) return;
+    const f = fighterFromWire(msg);
+    if (!f) return;
+    p.peerAgain = f;
+    if (p.role === 'host' && p.myAgain) startRound();
+    else {
+      setStatus('Your friend wants a rematch. Press A to accept, or B to leave.');
+      buzz([20, 40, 20]);
+      beep(880, 0.05);
+      render(); updateFriendBtn();
+    }
+    return;
+  }
   if (p.role === 'host') {
     if (msg.t === 'hello' && !p.state) {
       if (msg.v !== PROTOCOL) { try { p.conn.send({ t: 'bye', reason: 'version' }); } catch { /* closing anyway */ } linkLost(false, 'version'); return; }
@@ -658,8 +691,58 @@ function onLinkData(msg) {
     }
   } else if (msg.t === 'state') {
     const s = sanitizeState(msg.s);
-    if (s && s.seq >= p.lastSeq) applyPvp(s);
+    if (!s || !isNewerState(s, p.state)) return;
+    if (p.state && s.round > p.state.round) resetRound(s.round);
+    applyPvp(s);
   }
+}
+
+// ---------- rematches ----------
+function resetRound(round) {
+  const p = S.pvp;
+  clearTimeout(S.timer);
+  Object.assign(p, { round, lastSeq: -1, finished: false, waiting: false, phase: 'battle', myAgain: false, peerAgain: null });
+  S.itemSel = 0;
+  setStatus('Rematch! The battle is starting.');
+  updateFriendBtn();
+  showDevice();
+}
+
+/** Host only: both players asked for a rematch. */
+function startRound() {
+  const p = S.pvp;
+  const guest = p.peerAgain;
+  resetRound(p.round + 1);
+  applyPvp(makePvpState(S.roster[p.idx], guest, Math.random, p.round));
+}
+
+function requestRematch() {
+  const p = S.pvp;
+  if (!p || p.phase !== 'post' || p.myAgain) return;
+  p.myAgain = true;
+  const me = S.roster[p.idx];
+  try { p.conn.send({ t: 'again', code: me.code, lv: me.lv }); } catch { linkLost(false); return; }
+  beep(660);
+  if (p.role === 'host' && p.peerAgain) { startRound(); return; }
+  setStatus(p.peerAgain ? 'Starting the rematch…' : 'Rematch requested. Waiting for your friend to press A.');
+  render(); updateFriendBtn();
+}
+
+function leavePvp() {
+  if (!S.pvp) return;
+  endLink(true, 'quit');
+  S.view = S.active; S.tag = null; S.screen = 'reveal';
+  setStatus('You left the battle room.');
+  beep(440); render(); updateFriendBtn();
+}
+
+const friendLabel = $('#friendLabel');
+function updateFriendBtn() {
+  const btn = $('#friendBtn');
+  const post = S.pvp?.phase === 'post';
+  friendLabel.textContent = post ? (S.pvp.myAgain ? 'Waiting for friend…' : 'Rematch') : 'Battle a friend';
+  btn.classList.toggle('rematch', post);
+  btn.disabled = post && S.pvp.myAgain;
 }
 
 function pvpView(s, mine) {
@@ -728,25 +811,38 @@ function finishPvp(s) {
   S.result = { win, gain, from, to, foe: opp.name, pvp: true };
   S.battle = null;
   S.screen = 'result';
-  endLink(false);
+  // Keep the link open for a rematch, unless it already dropped.
+  if (p.closed) endLink(false);
+  else { p.phase = 'post'; p.myAgain = false; } // keep peerAgain: the friend may already have asked
+  updateFriendBtn();
   tune(win ? [[523, 0.08], [659, 0.08], [784, 0.08], [1047, 0.18]] : [[392, 0.12], [330, 0.12], [262, 0.24]]);
   buzz(win ? [30, 60, 30, 60, 120] : 200);
-  setStatus(win ? `You beat your friend's ${opp.name}!` : `Your friend's ${opp.name} won this time.`);
+  setStatus((win ? `You beat your friend's ${opp.name}!` : `Your friend's ${opp.name} won this time.`)
+    + (S.pvp ? ' Press A for a rematch, or B to leave.' : ''));
   save(); render(); renderRoster();
 }
 
-function endLink(sendBye) {
+function endLink(sendBye, reason) {
   const p = S.pvp;
   if (!p) return;
   S.pvp = null;
-  if (sendBye) { try { p.conn.send({ t: 'bye' }); } catch { /* already gone */ } }
+  updateFriendBtn();
+  if (sendBye) { try { p.conn.send(reason ? { t: 'bye', reason } : { t: 'bye' }); } catch { /* already gone */ } }
   // Give the last message a moment to arrive before tearing down.
   setTimeout(() => { try { p.conn.close(); } catch { /* ignore */ } p.handle?.destroy(); }, 600);
 }
 
 function linkLost(byFriend, reason) {
   const p = S.pvp;
-  if (!p || p.finished) return;
+  if (!p) return;
+  if (p.phase === 'post') {
+    // The battle already counted; just drop the rematch option.
+    endLink(false);
+    setStatus('Your friend left the battle room, so there is no rematch.');
+    render();
+    return;
+  }
+  if (p.finished) return; // result is about to show; finishPvp sees p.closed
   endLink(false);
   clearTimeout(S.timer);
   S.battle = null;
@@ -762,7 +858,9 @@ function linkLost(byFriend, reason) {
     : 'The connection to your friend dropped, so nobody gets XP for that battle.', true);
 }
 
-$('#friendBtn').addEventListener('click', () => openLink());
+$('#friendBtn').addEventListener('click', () => {
+  if (S.pvp?.phase === 'post') { requestRematch(); showDevice(); } else openLink();
+});
 $('#linkClose').addEventListener('click', closeLink);
 linkUI.root.addEventListener('click', (e) => { if (e.target === linkUI.root) closeLink(); });
 linkUI.hostBtn.addEventListener('click', startHost);

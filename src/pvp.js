@@ -42,9 +42,11 @@ function side(f) {
   return { code: f.code, lv: f.lv, name: f.name, type: f.type, shape: f.shape, max: e.hp, cur: e.hp, st: e.st, df: e.df };
 }
 
-export function makePvpState(hostFighter, guestFighter, rand = Math.random) {
+/** `round` counts rematches on the same link, so stale messages from an earlier round are ignored. */
+export function makePvpState(hostFighter, guestFighter, rand = Math.random, round = 0) {
   return {
     v: PROTOCOL,
+    round,
     seq: 0,
     host: side(hostFighter),
     guest: side(guestFighter),
@@ -100,7 +102,7 @@ const MSG_OK = /^[A-Z0-9 !+\-.]{1,24}$/;
 /** Guest side: accept a state from the host only in a safe, well-formed shape. */
 export function sanitizeState(raw) {
   if (!raw || raw.v !== PROTOCOL) return null;
-  const out = { v: PROTOCOL, seq: clampInt(raw.seq, 0, 1e6) };
+  const out = { v: PROTOCOL, round: clampInt(raw.round, 0, 1e6), seq: clampInt(raw.seq, 0, 1e6) };
   for (const k of SIDES) {
     const f = fighterFromWire(raw[k]);
     if (!f) return null;
@@ -121,6 +123,13 @@ export function sanitizeState(raw) {
     ? { target: a.target, text: a.text, shake: !!a.shake, crit: !!a.crit }
     : null;
   return out;
+}
+
+/** Guest side: should this incoming state replace the current one? */
+export function isNewerState(s, cur) {
+  if (!cur) return true;
+  if (s.round !== cur.round) return s.round > cur.round;
+  return s.seq >= cur.seq;
 }
 
 export { TYPES };

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { mulberry, derive } from '../src/game.js';
 import {
-  randomRoom, parseRoom, ROOM_ALPHABET, fighterFromWire, makePvpState, pvpStep, sanitizeState,
+  randomRoom, parseRoom, ROOM_ALPHABET, fighterFromWire, makePvpState, pvpStep, sanitizeState, isNewerState,
 } from '../src/pvp.js';
 
 const VOLT = '4901234567894';
@@ -71,6 +71,23 @@ describe('pvp battle', () => {
     s = pvpStep(s, 'host', { a: 'atk' }, () => 0.5);
     expect(s.over).toBe('host');
     expect(pvpStep(s, 'guest', { a: 'atk' })).toBe(s);
+  });
+});
+
+describe('rematch rounds', () => {
+  it('carries the round number and keeps it through sanitizing', () => {
+    const s = makePvpState(derive(VOLT), derive(GRUB), () => 0.1, 3);
+    expect(s.round).toBe(3);
+    expect(sanitizeState(JSON.parse(JSON.stringify(s))).round).toBe(3);
+  });
+
+  it('accepts a new round even though its seq restarts, and rejects stale states', () => {
+    const r0 = { round: 0, seq: 7 };
+    expect(isNewerState({ round: 1, seq: 0 }, r0)).toBe(true);
+    expect(isNewerState({ round: 0, seq: 8 }, r0)).toBe(true);
+    expect(isNewerState({ round: 0, seq: 6 }, r0)).toBe(false);
+    expect(isNewerState({ round: 0, seq: 9 }, { round: 1, seq: 0 })).toBe(false);
+    expect(isNewerState({ round: 0, seq: 0 }, null)).toBe(true);
   });
 });
 
