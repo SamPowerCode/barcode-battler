@@ -1,0 +1,764 @@
+<title>BARBRAWL</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Space+Grotesk:wght@500;700&family=VT323&display=swap">
+<script async src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
+<style>
+/* Layout: the handheld on the left, the "card table" (cards, scanner, roster) on the right; stacks on phones. Single toy-plastic look. */
+:root {
+  --bg: #E9E4DA;
+  --paper: #FFFFFF;
+  --ink: #141626;
+  --muted: #4A4D5E;
+  --line: #CFC8B8;
+  --shell: #2A3A9E;
+  --shell-deep: #151A3E;
+  --bezel: #12163A;
+  --accent: #FF7A1A;
+  --accent-ink: #1A1208;
+  --lcd: #A3AE80;
+  --lcd-off: #8C966C;
+  --lcd-ink: #1F2A14;
+  --lcd-ghost: rgba(31, 42, 20, 0.08);
+  --err: #A3261B;
+  --focus: #FFC21A;
+  --storm: #2A3A9E;
+  --swamp: #23704A;
+  --flame: #FF7A1A;
+  --f-display: 'Space Grotesk', system-ui, sans-serif;
+  --f-body: Inter, system-ui, sans-serif;
+  --f-lcd: VT323, ui-monospace, 'Courier New', monospace;
+  color-scheme: light;
+}
+html, body { background: var(--bg); color: var(--ink); }
+body { font-family: var(--f-body); font-size: 15px; line-height: 1.5; }
+* { box-sizing: border-box; }
+button { font: inherit; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+.page {
+  max-width: 1040px; margin: 0 auto;
+  padding-block: 28px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 24px;
+}
+.masthead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; }
+.masthead h1 { margin: 0; font-family: var(--f-display); font-style: italic; font-weight: 700; font-size: 32px; letter-spacing: 2px; color: var(--shell); }
+.masthead p { margin: 0; color: var(--muted); }
+
+.layout { display: flex; flex-wrap: wrap; gap: 40px; justify-content: center; align-items: flex-start; }
+
+/* ---------- device ---------- */
+.device-wrap { position: relative; width: 360px; padding-top: 100px; flex: 0 0 auto; }
+@media (max-width: 391px) { .device-wrap { zoom: 0.86; } }
+.swipe {
+  position: absolute; left: 70px; top: 0; width: 220px; height: 130px; z-index: 0;
+  opacity: 0; border-radius: 10px; background: var(--paper); overflow: hidden;
+  box-shadow: 0 8px 18px rgba(20, 24, 60, 0.18); display: flex; flex-direction: column;
+}
+.shell {
+  position: relative; z-index: 1; width: 360px; height: 740px; background: var(--shell);
+  border-radius: 48px 48px 72px 72px;
+  box-shadow: inset 0 -12px 0 rgba(0,0,0,0.2), inset 0 6px 0 rgba(255,255,255,0.18), 0 30px 60px rgba(20,24,60,0.28);
+}
+.shell > * { position: absolute; }
+.slot { left: 50px; top: 8px; width: 260px; height: 12px; border-radius: 6px; background: rgba(0,0,0,0.5); }
+.led { left: 32px; top: 35px; width: 10px; height: 10px; border-radius: 50%; background: #5A1A16; }
+.led.on { background: #FF3B30; box-shadow: 0 0 10px #FF3B30; }
+.led.flash { animation: ledflash 0.18s steps(2) 4; }
+@keyframes ledflash { 50% { background: #FFE3E0; box-shadow: 0 0 18px #FF3B30; } }
+.lbl { font-size: 11px; font-weight: 600; letter-spacing: 2px; color: rgba(255,255,255,0.85); }
+.lbl-scan { left: 48px; top: 31px; }
+.lbl-swipe { right: 32px; top: 31px; }
+.bezel { left: 22px; top: 60px; width: 316px; height: 298px; border-radius: 20px; background: var(--bezel); box-shadow: inset 0 2px 6px rgba(0,0,0,0.5); }
+.lcd {
+  position: absolute; left: 14px; top: 14px; width: 288px; height: 270px; border-radius: 6px;
+  background: var(--lcd); box-shadow: inset 0 0 18px rgba(31,42,20,0.35);
+  padding: 12px; font-family: var(--f-lcd); color: var(--lcd-ink);
+  display: flex; flex-direction: column; gap: 6px; overflow: hidden;
+}
+.lcd.off { background: var(--lcd-off); }
+.lcd.center { align-items: center; justify-content: space-between; text-align: center; }
+.wordmark { left: 0; top: 376px; width: 360px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.wordmark b { font-family: var(--f-display); font-style: italic; font-weight: 700; font-size: 36px; letter-spacing: 3px; color: #FFFFFF; }
+.dpad { left: 34px; top: 484px; display: grid; grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 44px); }
+.dpad button { border: 0; background: var(--shell-deep); color: rgba(255,255,255,0.55); font-size: 13px; cursor: pointer; padding: 0; }
+.dpad button:active { background: #0B0E26; }
+.dpad .u { grid-area: 1 / 2; border-radius: 8px 8px 0 0; }
+.dpad .l { grid-area: 2 / 1; border-radius: 8px 0 0 8px; }
+.dpad .c { grid-area: 2 / 2; background: var(--shell-deep); }
+.dpad .r { grid-area: 2 / 3; border-radius: 0 8px 8px 0; }
+.dpad .d { grid-area: 3 / 2; border-radius: 0 0 8px 8px; }
+.ab { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.ab-b { left: 206px; top: 536px; }
+.ab-a { left: 276px; top: 494px; }
+.round {
+  width: 58px; height: 58px; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-ink);
+  font-family: var(--f-display); font-weight: 700; font-size: 20px; cursor: pointer;
+  box-shadow: inset 0 -5px 0 rgba(0,0,0,0.22);
+}
+.round:active { transform: translateY(2px); box-shadow: inset 0 2px 0 rgba(0,0,0,0.25); }
+.pills { left: 70px; top: 650px; display: flex; gap: 24px; }
+.pills .ab { gap: 8px; }
+.pill { width: 56px; height: 16px; border-radius: 8px; border: 0; background: var(--shell-deep); transform: rotate(-18deg); cursor: pointer; }
+.pill:active { background: #0B0E26; }
+.grille { left: 250px; top: 650px; display: grid; grid-template-columns: repeat(5, 7px); gap: 8px; transform: rotate(-18deg); }
+.grille i { width: 7px; height: 7px; border-radius: 50%; background: rgba(0,0,0,0.4); }
+
+/* ---------- LCD content ---------- */
+.row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; width: 100%; }
+.t16 { font-size: 17px; line-height: 1; }
+.t20 { font-size: 21px; line-height: 1; }
+.t22 { font-size: 23px; line-height: 1; }
+.t28 { font-size: 29px; line-height: 1; }
+.t40 { font-size: 40px; line-height: 0.95; }
+.t52 { font-size: 52px; line-height: 0.9; }
+.rule { border-bottom: 2px solid var(--lcd-ink); padding-bottom: 5px; }
+.bar { display: flex; gap: 2px; width: 100%; }
+.seg { flex: 1; height: 7px; background: var(--lcd-ghost); }
+.seg.on { background: var(--lcd-ink); }
+.box { border: 2px solid var(--lcd-ink); padding: 3px 8px; width: 100%; white-space: nowrap; overflow: hidden; }
+.arena { flex: 1; position: relative; width: 100%; }
+.spr { image-rendering: pixelated; display: block; }
+.arena .spr { position: absolute; }
+.arena .foe { right: 6px; top: 0; }
+.arena .you { left: 6px; bottom: 0; }
+.dmg { position: absolute; }
+.dmg.foe { right: 78px; top: 10px; }
+.dmg.you { left: 86px; bottom: 14px; }
+.rev { display: flex; gap: 14px; align-items: center; flex: 1; }
+.stats { display: flex; flex-direction: column; gap: 3px; }
+.blink { animation: blink 1s steps(2, start) infinite; }
+@keyframes blink { to { visibility: hidden; } }
+.shake { animation: shake 0.35s linear; }
+@keyframes shake { 20% { transform: translateX(-4px); } 40% { transform: translateX(4px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(2px); } }
+.pop { animation: pop 0.6s ease-out; }
+@keyframes pop { from { transform: translateY(8px); opacity: 0; } 30% { opacity: 1; } to { transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .blink, .shake, .pop, .led.flash { animation: none; }
+}
+
+/* ---------- side panel ---------- */
+.panel { flex: 1 1 340px; min-width: 0; max-width: 560px; display: flex; flex-direction: column; gap: 28px; }
+.panel h2 { margin: 0 0 4px; font-family: var(--f-display); font-weight: 700; font-size: 18px; text-wrap: balance; }
+.panel .lede { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.card {
+  border: 0; padding: 0; border-radius: 10px; overflow: hidden; background: var(--paper); cursor: pointer;
+  text-align: left; display: flex; flex-direction: column; box-shadow: 0 6px 14px rgba(20,24,60,0.12);
+  transition: transform 0.15s ease, box-shadow 0.15s ease; min-width: 0;
+}
+.card:hover { transform: translateY(-3px); box-shadow: 0 10px 20px rgba(20,24,60,0.16); }
+.card-top { padding: 10px; display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; flex-wrap: wrap; min-height: 76px; }
+.card-name { font-family: var(--f-display); font-weight: 700; font-size: 14px; line-height: 1.1; display: block; }
+.chip { display: inline-block; margin-top: 6px; font-size: 10px; font-weight: 600; letter-spacing: 1px; padding: 2px 7px; border-radius: 99px; border: 1.5px solid currentColor; }
+.card-bot { padding: 8px 6px; display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--ink); }
+.card-bot canvas { max-width: 100%; height: 26px; }
+.card-bot small { font-size: 9px; letter-spacing: 1px; font-variant-numeric: tabular-nums; }
+.swipe .card-top { min-height: 78px; }
+.swipe .card-name { font-size: 17px; }
+.swipe .card-bot canvas { height: 34px; }
+
+.scanrow { display: flex; flex-wrap: wrap; gap: 8px; }
+.field { display: flex; flex-direction: column; gap: 6px; flex: 1 1 200px; min-width: 0; }
+.field label { font-size: 13px; font-weight: 600; }
+.field input {
+  height: 44px; border: 1.5px solid var(--line); border-radius: 10px; padding: 0 12px; background: var(--paper);
+  color: var(--ink); font: 600 16px/1 var(--f-body); letter-spacing: 1px; font-variant-numeric: tabular-nums; width: 100%;
+}
+.field input:focus-visible { border-color: var(--shell); }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.btn {
+  height: 44px; padding: 0 16px; border-radius: 10px; border: 1.5px solid var(--shell); background: var(--shell); color: #FFFFFF;
+  font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+}
+.btn.ghost { background: var(--paper); color: var(--shell); }
+.btn:hover { filter: brightness(1.08); }
+.btn:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.status { margin: 10px 0 0; min-height: 1.5em; color: var(--muted); font-size: 14px; }
+.status.err { color: var(--err); }
+
+.roster { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.rost {
+  width: 100%; border: 1.5px solid var(--line); background: var(--paper); border-radius: 10px; padding: 8px 12px;
+  display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 12px; align-items: center; cursor: pointer; text-align: left; color: var(--ink);
+}
+.rost.is-active { border-color: var(--shell); box-shadow: 0 0 0 1.5px var(--shell); }
+.rost canvas { background: var(--lcd); border-radius: 4px; padding: 3px; image-rendering: pixelated; }
+.rost b { font-family: var(--f-display); font-size: 15px; display: block; }
+.rost .meta { font-size: 12px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.tchip { font-size: 10px; font-weight: 600; letter-spacing: 1px; padding: 1px 7px; border-radius: 99px; color: #FFFFFF; }
+.t-STORM { background: var(--storm); }
+.t-SWAMP { background: var(--swamp); }
+.t-FLAME { background: var(--flame); color: var(--accent-ink); }
+.empty { margin: 0; padding: 14px; border: 1.5px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 14px; }
+
+.rules { display: grid; gap: 10px; font-size: 14px; }
+.rules p { margin: 0; }
+.keys { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; margin: 0; }
+.keys dt { font-weight: 600; white-space: nowrap; }
+.keys dd { margin: 0; color: var(--muted); }
+kbd { font: 600 12px var(--f-body); padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--paper); }
+</style>
+
+<div class="page">
+  <header class="masthead">
+    <h1>BARBRAWL</h1>
+    <p>Every barcode is a fighter. Scan one, then battle.</p>
+  </header>
+
+  <div class="layout">
+    <div class="device-wrap">
+      <div class="swipe" id="swipe" aria-hidden="true"></div>
+      <div class="shell">
+        <div class="slot"></div>
+        <div class="led" id="led"></div>
+        <span class="lbl lbl-scan">SCAN</span>
+        <span class="lbl lbl-swipe">▼ SWIPE CARD</span>
+        <div class="bezel"><div class="lcd" id="lcd" aria-live="polite"></div></div>
+        <div class="wordmark"><b>BARBRAWL</b><span class="lbl" style="letter-spacing:4px">SCAN · FIGHT · WIN</span></div>
+        <div class="dpad">
+          <button class="u" data-key="U" aria-label="Up">▲</button>
+          <button class="l" data-key="L" aria-label="Left">◀</button>
+          <span class="c"></span>
+          <button class="r" data-key="R" aria-label="Right">▶</button>
+          <button class="d" data-key="D" aria-label="Down">▼</button>
+        </div>
+        <div class="ab ab-b"><button class="round" data-key="B" aria-label="B: item or back">B</button><span class="lbl">ITEM</span></div>
+        <div class="ab ab-a"><button class="round" data-key="A" aria-label="A: fight or confirm">A</button><span class="lbl">FIGHT</span></div>
+        <div class="pills">
+          <div class="ab"><button class="pill" data-key="MODE" aria-label="Mode: sound on or off"></button><span class="lbl">SOUND</span></div>
+          <div class="ab"><button class="pill" data-key="POWER" aria-label="Power"></button><span class="lbl">POWER</span></div>
+        </div>
+        <div class="grille" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <section>
+        <h2>Swipe a starter card</h2>
+        <p class="lede">Tap a card to slide it through the scanner.</p>
+        <div class="cards" id="cards"></div>
+      </section>
+
+      <section>
+        <h2>Scan any barcode</h2>
+        <p class="lede">Type the digits under a barcode from anything in your house, or upload a photo of one.</p>
+        <form id="scanForm" class="scanrow" novalidate>
+          <div class="field">
+            <label for="code">Barcode digits</label>
+            <input id="code" name="code" inputmode="numeric" autocomplete="off" placeholder="e.g. 5012345678900" maxlength="20">
+          </div>
+          <div class="btns">
+            <button class="btn" type="submit">Scan</button>
+            <label class="btn ghost" for="photo">Photo<input class="sr" type="file" id="photo" accept="image/*" capture="environment"></label>
+            <button class="btn ghost" type="button" id="random">Random product</button>
+          </div>
+        </form>
+        <p class="status" id="status" aria-live="polite"></p>
+      </section>
+
+      <section>
+        <h2>Your roster</h2>
+        <p class="empty" id="rosterEmpty">No fighters yet. Swipe a starter card or scan a barcode to get your first one.</p>
+        <ul class="roster" id="roster"></ul>
+      </section>
+
+      <section class="rules">
+        <h2>How to play</h2>
+        <dl class="keys">
+          <dt><kbd>A</kbd> or <kbd>Z</kbd> / <kbd>Enter</kbd></dt><dd>Pick a fighter, start a battle, attack</dd>
+          <dt><kbd>B</kbd> or <kbd>X</kbd></dt><dd>Use the selected item in battle, or go back</dd>
+          <dt>Arrows</dt><dd>Browse your roster, or choose an item in battle</dd>
+        </dl>
+        <p><b>Types:</b> STORM beats SWAMP, SWAMP beats FLAME, FLAME beats STORM. A strong matchup hits for 1.5×.</p>
+        <p><b>Items:</b> about one barcode in nine is an item instead of a fighter: POTION heals, POWER raises attack, GUARD raises defense. Your bag holds five.</p>
+        <p><b>Rare codes:</b> real product barcodes (with a valid check digit) get +10% stats. Codes with four repeated digits in a row, or that read the same backwards, get +30%.</p>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (s) { return document.querySelector(s); };
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var INK = '#1F2A14', GHOST = 'rgba(31,42,20,0.08)';
+
+  var TYPES = ['STORM', 'SWAMP', 'FLAME'];
+  var BEATS = { STORM: 'SWAMP', SWAMP: 'FLAME', FLAME: 'STORM' };
+  var TYPE_STYLE = {
+    STORM: { bg: '#2A3A9E', ink: '#FFFFFF', ghost: 'rgba(255,255,255,0.12)' },
+    SWAMP: { bg: '#23704A', ink: '#FFFFFF', ghost: 'rgba(255,255,255,0.12)' },
+    FLAME: { bg: '#FF7A1A', ink: '#1A1208', ghost: 'rgba(26,18,8,0.1)' }
+  };
+  var SHAPES = {
+    voltmaw: ['..XX..XX..', '.XXXXXXXX.', 'XX.XXXX.XX', 'XXXXXXXXXX', '.XX....XX.', '.XXXXXXXX.', '..XXXXXX..', '.XX.XX.XX.', 'XX..XX..XX', 'X........X'],
+    grublin: ['...XXXX...', '..XXXXXX..', '.X.XXXX.X.', 'XXXXXXXXXX', 'X.XXXXXX.X', '..XXXXXX..', '..X.XX.X..', '.XX....XX.', 'XX......XX', '..........'],
+    emberkin: ['....XX....', '...XXXX...', '..XX..XX..', '.XXXXXXXX.', 'XX.XXXX.XX', 'XXXXXXXXXX', '.XXX..XXX.', '..XXXXXX..', '.XX.XX.XX.', 'XX......XX']
+  };
+  var STARTERS = {
+    '4901234567894': { name: 'VOLTMAW', type: 'STORM', hp: 3100, st: 820, df: 540, shape: SHAPES.voltmaw },
+    '7312058846210': { name: 'GRUBLIN', type: 'SWAMP', hp: 2400, st: 610, df: 900, shape: SHAPES.grublin },
+    '5099876543217': { name: 'EMBERKIN', type: 'FLAME', hp: 1900, st: 1040, df: 380, shape: SHAPES.emberkin }
+  };
+  var PRE = ['VOLT', 'GRUB', 'EMBER', 'KRAG', 'ZOR', 'MIRE', 'BLAZ', 'SKREE', 'THUN', 'NOX', 'GLOM', 'FANG', 'RUST', 'QUIL', 'BRUX', 'SNARL', 'DREG', 'FLUX', 'MOSS', 'CINDR'];
+  var SUF = ['MAW', 'LIN', 'KIN', 'OX', 'TUSK', 'ROK', 'ZEL', 'BEAK', 'CLAW', 'GORE', 'NUB', 'FIN', 'SPIK', 'DRAK', 'ITE', 'ON'];
+  var ITEMS = { POTION: 'HEALS 40% HP', POWER: 'ST UP 30%', GUARD: 'DF UP 30%' };
+  var ITEM_KINDS = ['POTION', 'POWER', 'GUARD'];
+  var BAG_MAX = 5;
+
+  // ---------- state ----------
+  var S = { power: true, screen: 'scan', roster: [], items: [], active: -1, view: -1, sound: true, tag: null, battle: null, result: null, lastItem: null, itemSel: 0, scanning: false, timer: null };
+
+  function load() {
+    try {
+      var d = JSON.parse(localStorage.getItem('barbrawl.v1') || 'null');
+      if (d && Array.isArray(d.roster)) {
+        S.roster = d.roster; S.items = Array.isArray(d.items) ? d.items : [];
+        S.active = typeof d.active === 'number' ? d.active : -1; S.sound = d.sound !== false;
+      }
+    } catch (e) {}
+  }
+  function save() {
+    try { localStorage.setItem('barbrawl.v1', JSON.stringify({ roster: S.roster, items: S.items, active: S.active, sound: S.sound })); } catch (e) {}
+  }
+
+  // ---------- barcode -> fighter ----------
+  function fnv(s) { var h = 0x811c9dc5; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return h >>> 0; }
+  function mulberry(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function r10(n) { return Math.round(n / 10) * 10; }
+  function digitSum(c) { var s = 0; for (var i = 0; i < c.length; i++) s += +c[i]; return s; }
+  function checkDigit(body) { var s = 0; for (var i = body.length - 1, w = 3; i >= 0; i--, w = w === 3 ? 1 : 3) s += +body[i] * w; return (10 - s % 10) % 10; }
+  function validGtin(c) { return [8, 12, 13, 14].indexOf(c.length) >= 0 && checkDigit(c.slice(0, -1)) === +c[c.length - 1]; }
+  function isRare(c) { return /(\d)\1{3}/.test(c) || c === c.split('').reverse().join(''); }
+  function isItem(c) { return !STARTERS[c] && digitSum(c) % 9 === 0; }
+  function randomGtin() { var b = ''; for (var i = 0; i < 12; i++) b += Math.floor(Math.random() * 10); return b + checkDigit(b); }
+
+  function genShape(r) {
+    var P = [0.3, 0.42, 0.55, 0.68, 0.8], rows = [], y, x;
+    for (y = 0; y < 10; y++) {
+      var left = [];
+      for (x = 0; x < 5; x++) {
+        var p = P[x];
+        if (y === 0 || y === 9) p *= 0.55;
+        if (y >= 7 && x >= 3) p *= 0.6;
+        left.push(r() < p ? 'X' : '.');
+      }
+      rows.push(left);
+    }
+    rows[1][2] = rows[1][3] = 'X';
+    rows[2][1] = 'X'; rows[2][2] = '.'; rows[2][3] = 'X'; rows[2][4] = 'X';
+    rows[3][1] = rows[3][2] = rows[3][3] = rows[3][4] = 'X';
+    for (y = 4; y < 7; y++) { rows[y][3] = 'X'; rows[y][4] = 'X'; }
+    return rows.map(function (l) { return l.join('') + l.slice().reverse().join(''); });
+  }
+
+  function derive(code) {
+    var base = { code: code, lv: 1, xp: 0, wins: 0, real: validGtin(code), rare: isRare(code) };
+    if (STARTERS[code]) { var s = STARTERS[code]; return Object.assign(base, { name: s.name, type: s.type, hp: s.hp, st: s.st, df: s.df, shape: s.shape }); }
+    var r = mulberry(fnv(code));
+    var m = 1 + (base.real ? 0.1 : 0) + (base.rare ? 0.3 : 0);
+    base.hp = r10((1500 + r() * 2500) * m);
+    base.st = r10((300 + r() * 800) * m);
+    base.df = r10((200 + r() * 700) * m);
+    base.name = (PRE[Math.floor(r() * PRE.length)] + SUF[Math.floor(r() * SUF.length)]).slice(0, 9);
+    base.type = TYPES[Math.floor(r() * 3)];
+    base.shape = genShape(r);
+    return base;
+  }
+  function eff(f) { var m = 1 + 0.06 * (f.lv - 1); return { hp: r10(f.hp * m), st: r10(f.st * m), df: r10(f.df * m) }; }
+
+  // ---------- drawing ----------
+  function drawSprite(cv, shape, px, ink, ghost) {
+    if (!cv) return;
+    cv.width = 10 * px + 9; cv.height = 10 * px + 9;
+    var ctx = cv.getContext('2d');
+    for (var y = 0; y < 10; y++) for (var x = 0; x < 10; x++) {
+      ctx.fillStyle = shape[y][x] === 'X' ? (ink || INK) : (ghost || GHOST);
+      ctx.fillRect(x * (px + 1), y * (px + 1), px, px);
+    }
+  }
+  function barWidths(code) {
+    var a = [];
+    for (var i = 0; i < code.length; i++) {
+      var d = +code[i];
+      a.push([((d % 3) + 1) * 2, 1], [(((d + 1) % 2) + 1) * 2, 0], [((d * 7) % 3) + 1, 1], [2, 0]);
+    }
+    return a;
+  }
+  function drawBars(cv, code, h, color) {
+    if (!cv) return;
+    var bars = [[2, 1], [2, 0], [2, 1], [2, 0]].concat(barWidths(code), [[2, 1], [2, 0], [2, 1]]);
+    var w = bars.reduce(function (s, b) { return s + b[0]; }, 0);
+    cv.width = w; cv.height = h;
+    var ctx = cv.getContext('2d'), x = 0;
+    ctx.fillStyle = color;
+    bars.forEach(function (b) { if (b[1]) ctx.fillRect(x, 0, b[0], h); x += b[0]; });
+  }
+  function segs(cur, max) {
+    var on = cur <= 0 ? 0 : Math.max(1, Math.ceil(cur / max * 10)), h = '';
+    for (var i = 0; i < 10; i++) h += '<div class="seg' + (i < on ? ' on' : '') + '"></div>';
+    return '<div class="bar">' + h + '</div>';
+  }
+
+  // ---------- LCD screens ----------
+  var lcd = $('#lcd');
+  function render() {
+    $('#led').classList.toggle('on', S.power);
+    lcd.className = 'lcd';
+    if (!S.power) { lcd.classList.add('off'); lcd.innerHTML = ''; return; }
+    var fn = { scan: scrScan, reveal: scrReveal, item: scrItem, battle: scrBattle, result: scrResult }[S.screen];
+    fn();
+  }
+
+  function scrScan() {
+    lcd.classList.add('center');
+    var n = S.roster.length;
+    lcd.innerHTML =
+      '<div class="row t16"><span>READY</span><span>' + (S.sound ? 'SND ON' : 'SND OFF') + '</span></div>' +
+      '<div class="t40">SWIPE A<br>BARCODE</div>' +
+      '<canvas id="scanBars"></canvas>' +
+      '<div class="t28 blink" style="letter-spacing:6px">&gt;&gt;&gt;&gt;&gt;&gt;</div>' +
+      '<div class="t16">' + (n ? 'A: PICK FIGHTER (' + n + ')' : 'ANY PRODUCT WORKS') + '</div>';
+    drawBars($('#scanBars'), '0123456789', 44, INK);
+  }
+
+  function scrReveal() {
+    var f = S.roster[S.view], e = eff(f), n = S.roster.length;
+    var flags = [f.real ? 'REAL' : '', f.rare ? 'RARE' : ''].filter(Boolean).join(' ');
+    lcd.innerHTML =
+      '<div class="row t20 rule"><span>' + (S.tag || ('ROSTER ' + (S.view + 1) + '/' + n)) + '</span><span>LV ' + f.lv + '</span></div>' +
+      '<div class="rev"><canvas class="spr" id="sView"></canvas>' +
+      '<div class="stats t22"><span class="t28">' + f.name + '</span><span>' + f.type + '</span><span>HP ' + e.hp + '</span><span>ST ' + e.st + '</span><span>DF ' + e.df + '</span></div></div>' +
+      '<div class="row t16"><span>#' + f.code + '</span><span>' + flags + '</span></div>' +
+      '<div class="row t16"><span>XP ' + f.xp + '/' + (f.lv * 100) + '</span><span>WINS ' + f.wins + '</span></div>' +
+      '<div class="t16">A:FIGHT  B:BACK' + (n > 1 ? '  &lt; &gt;' : '') + '</div>';
+    drawSprite($('#sView'), f.shape, 9);
+  }
+
+  function scrItem() {
+    lcd.classList.add('center');
+    var it = S.lastItem;
+    lcd.innerHTML =
+      '<div class="t22">' + (it.full ? 'BAG FULL!' : 'ITEM GET!') + '</div>' +
+      '<div class="t52">' + it.kind + '</div>' +
+      '<div class="t22">' + ITEMS[it.kind] + '</div>' +
+      '<div class="t20">BAG ' + S.items.length + '/' + BAG_MAX + '</div>' +
+      '<div class="t16 blink">PRESS A</div>';
+  }
+
+  function scrBattle() {
+    var b = S.battle, anim = b.anim; b.anim = null;
+    var hint;
+    if (b.turn === 'you' && !b.busy) {
+      hint = S.items.length ? 'A:ATK  B:' + S.items[S.itemSel % S.items.length] + ' (' + S.items.length + ')' + (S.items.length > 1 ? ' &lt;&gt;' : '') : 'A:ATTACK  B:NO ITEMS';
+    } else hint = '. . .';
+    lcd.innerHTML =
+      '<div class="row t20"><span>' + b.foe.rec.name + ' L' + b.foe.rec.lv + '</span><span>' + b.foe.cur + '</span></div>' +
+      segs(b.foe.cur, b.foe.max) +
+      '<div class="arena">' +
+        '<canvas id="sFoe" class="spr foe' + (anim && anim.shake && anim.target === 'foe' ? ' shake' : '') + '"></canvas>' +
+        '<canvas id="sYou" class="spr you' + (anim && anim.shake && anim.target === 'you' ? ' shake' : '') + '"></canvas>' +
+        (anim && anim.text ? '<span class="dmg t28 pop ' + anim.target + '">' + anim.text + '</span>' : '') +
+      '</div>' +
+      '<div class="row t20"><span>' + b.you.rec.name + ' L' + b.you.rec.lv + '</span><span>' + b.you.cur + '</span></div>' +
+      segs(b.you.cur, b.you.max) +
+      '<div class="box t20">' + b.msg + '</div>' +
+      '<div class="t16">' + hint + '</div>';
+    drawSprite($('#sFoe'), b.foe.rec.shape, 5);
+    drawSprite($('#sYou'), b.you.rec.shape, 6);
+  }
+
+  function scrResult() {
+    lcd.classList.add('center');
+    var r = S.result, f = S.roster[S.active];
+    lcd.innerHTML =
+      '<div class="t52">' + (r.win ? 'YOU WIN!' : 'YOU LOSE') + '</div>' +
+      '<canvas class="spr" id="sView"></canvas>' +
+      '<div class="t20">' + (r.win ? 'BEAT ' : 'LOST TO ') + r.foe + '</div>' +
+      '<div class="t22">+' + r.gain + ' XP' + (r.to > r.from ? '  LV ' + r.from + ' &gt; ' + r.to : '') + '</div>' +
+      '<div class="t16 blink">PRESS A</div>';
+    drawSprite($('#sView'), f.shape, 6);
+  }
+
+  // ---------- sound ----------
+  var actx = null;
+  function beep(f, d, delay) {
+    if (!S.sound) return;
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      var t = actx.currentTime + (delay || 0);
+      var o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'square'; o.frequency.value = f; g.gain.value = 0.035;
+      o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + (d || 0.06));
+    } catch (e) {}
+  }
+  function tune(notes) { var t = 0; notes.forEach(function (n) { beep(n[0], n[1], t); t += n[1] + 0.02; }); }
+
+  // ---------- battle ----------
+  function startBattle() {
+    var you = S.roster[S.view]; S.active = S.view; save();
+    var ye = eff(you);
+    var foe = derive(randomGtin());
+    foe.lv = Math.max(1, you.lv + Math.floor(Math.random() * 3) - 1);
+    var fe = eff(foe);
+    S.battle = {
+      you: { rec: you, st: ye.st, df: ye.df, max: ye.hp, cur: ye.hp },
+      foe: { rec: foe, st: fe.st, df: fe.df, max: fe.hp, cur: fe.hp },
+      turn: 'you', busy: false, msg: foe.name + ' APPEARS!', anim: null
+    };
+    S.itemSel = 0; S.screen = 'battle';
+    tune([[392, 0.07], [523, 0.07], [659, 0.1]]);
+    renderRoster();
+  }
+
+  function hit(att, def, target) {
+    var b = S.battle;
+    if (Math.random() < 0.05) { b.msg = att.rec.name + ' MISSED!'; b.anim = { target: target, text: 'MISS', shake: false }; beep(180, 0.1); return; }
+    var m = BEATS[att.rec.type] === def.rec.type ? 1.5 : BEATS[def.rec.type] === att.rec.type ? 0.75 : 1;
+    var d = att.st * (0.85 + Math.random() * 0.3) * m - def.df * 0.45;
+    var crit = Math.random() < 0.08; if (crit) d *= 1.5;
+    d = Math.max(40, r10(d));
+    def.cur = Math.max(0, def.cur - d);
+    b.msg = att.rec.name + ' -' + d + (crit ? ' CRIT!' : m > 1 ? ' SUPER!' : m < 1 ? ' WEAK' : '');
+    b.anim = { target: target, text: '-' + d, shake: true };
+    beep(crit || m > 1 ? 990 : 520, 0.07);
+  }
+
+  function endPlayerTurn() {
+    var b = S.battle; b.busy = true;
+    if (b.foe.cur <= 0) { render(); S.timer = setTimeout(function () { finish(true); }, 1000); return; }
+    b.turn = 'foe'; render();
+    S.timer = setTimeout(foeAct, 900);
+  }
+  function foeAct() {
+    var b = S.battle; if (!b) return;
+    hit(b.foe, b.you, 'you');
+    if (b.you.cur <= 0) { render(); S.timer = setTimeout(function () { finish(false); }, 1000); return; }
+    b.turn = 'you'; b.busy = false; render();
+  }
+  function attack() {
+    var b = S.battle; if (b.turn !== 'you' || b.busy) return;
+    hit(b.you, b.foe, 'foe'); endPlayerTurn();
+  }
+  function useItem() {
+    var b = S.battle; if (b.turn !== 'you' || b.busy) return;
+    if (!S.items.length) { b.msg = 'BAG IS EMPTY'; beep(200, 0.08); render(); return; }
+    var kind = S.items.splice(S.itemSel % S.items.length, 1)[0]; S.itemSel = 0;
+    if (kind === 'POTION') {
+      var h = r10(b.you.max * 0.4); b.you.cur = Math.min(b.you.max, b.you.cur + h);
+      b.msg = 'POTION! +' + h + ' HP'; b.anim = { target: 'you', text: '+' + h, shake: false };
+    } else if (kind === 'POWER') { b.you.st = r10(b.you.st * 1.3); b.msg = 'POWER! ST ' + b.you.st; }
+    else { b.you.df = r10(b.you.df * 1.3); b.msg = 'GUARD! DF ' + b.you.df; }
+    tune([[660, 0.05], [880, 0.08]]);
+    save(); endPlayerTurn();
+  }
+  function finish(win) {
+    var b = S.battle, f = b.you.rec, from = f.lv;
+    var gain = win ? 50 + b.foe.rec.lv * 25 : 15;
+    f.xp += gain;
+    while (f.xp >= f.lv * 100) { f.xp -= f.lv * 100; f.lv++; }
+    if (win) f.wins++;
+    S.result = { win: win, gain: gain, from: from, to: f.lv, foe: b.foe.rec.name };
+    S.battle = null; S.screen = 'result';
+    tune(win ? [[523, 0.08], [659, 0.08], [784, 0.08], [1047, 0.18]] : [[392, 0.12], [330, 0.12], [262, 0.24]]);
+    save(); render(); renderRoster();
+  }
+
+  // ---------- input ----------
+  function cycle(d) { var n = S.roster.length; if (!n) return; S.view = (S.view + d + n) % n; S.active = S.view; S.tag = null; save(); renderRoster(); }
+
+  function press(k) {
+    if (k === 'POWER') { togglePower(); return; }
+    if (!S.power) return;
+    if (k === 'MODE') { S.sound = !S.sound; save(); beep(880, 0.05); render(); return; }
+    var back = k === 'L' || k === 'U', fwd = k === 'R' || k === 'D';
+    switch (S.screen) {
+      case 'scan':
+        if (!S.roster.length) { beep(200, 0.08); return; }
+        if (k === 'B') return;
+        S.view = S.active >= 0 && S.active < S.roster.length ? S.active : 0; S.tag = null; S.screen = 'reveal'; beep(660); break;
+      case 'reveal':
+        if (k === 'A') { startBattle(); break; }
+        if (k === 'B') { S.screen = 'scan'; beep(440); break; }
+        if (back) cycle(-1); else if (fwd) cycle(1); beep(600, 0.03); break;
+      case 'item': S.screen = 'scan'; beep(660); break;
+      case 'battle':
+        if (k === 'A') { attack(); return; }
+        if (k === 'B') { useItem(); return; }
+        if (S.items.length > 1 && (back || fwd)) { S.itemSel = (S.itemSel + (back ? -1 : 1) + S.items.length) % S.items.length; beep(600, 0.03); }
+        break;
+      case 'result':
+        if (k === 'A' || k === 'B') { S.view = S.active; S.tag = null; S.screen = 'reveal'; beep(660); }
+        break;
+    }
+    render();
+  }
+
+  function togglePower() {
+    clearTimeout(S.timer);
+    S.power = !S.power; S.battle = null; S.screen = 'scan';
+    if (S.power) tune([[262, 0.05], [523, 0.08]]);
+    render();
+  }
+
+  document.querySelectorAll('[data-key]').forEach(function (b) {
+    b.addEventListener('click', function () { press(b.getAttribute('data-key')); });
+  });
+  window.addEventListener('keydown', function (e) {
+    var t = e.target && e.target.tagName;
+    if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return;
+    if (e.key === 'Enter' && (t === 'BUTTON' || t === 'LABEL')) return;
+    var map = { ArrowLeft: 'L', ArrowRight: 'R', ArrowUp: 'U', ArrowDown: 'D', z: 'A', Z: 'A', Enter: 'A', x: 'B', X: 'B' };
+    var k = map[e.key]; if (!k) return;
+    if (k.length === 1 && 'LRUD'.indexOf(k) >= 0) e.preventDefault();
+    press(k);
+  });
+
+  // ---------- scanning ----------
+  var statusEl = $('#status');
+  function setStatus(msg, err) { statusEl.textContent = msg; statusEl.classList.toggle('err', !!err); }
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  function cardHTML(code, big) {
+    var s = STARTERS[code];
+    var t = s ? TYPE_STYLE[s.type] : { bg: '#ECE7DC', ink: '#141626' };
+    return '<div class="card-top" style="background:' + t.bg + ';color:' + t.ink + '">' +
+      '<span><span class="card-name">' + (s ? s.name : 'PRODUCT') + '</span><span class="chip">' + (s ? s.type : '???') + '</span></span>' +
+      (s ? '<canvas class="spr" data-shape="' + code + '"></canvas>' : '') +
+      '</div><div class="card-bot"><canvas data-bars="' + code + '"></canvas><small>' + code + '</small></div>';
+  }
+  function paintCard(root, big) {
+    root.querySelectorAll('canvas[data-shape]').forEach(function (cv) {
+      var s = STARTERS[cv.getAttribute('data-shape')], t = TYPE_STYLE[s.type];
+      drawSprite(cv, s.shape, big ? 5 : 4, t.ink, t.ghost);
+    });
+    root.querySelectorAll('canvas[data-bars]').forEach(function (cv) { drawBars(cv, cv.getAttribute('data-bars'), big ? 34 : 26, '#141626'); });
+  }
+
+  function swipeAnim(code) {
+    var el = $('#swipe');
+    el.innerHTML = cardHTML(code, true); paintCard(el, true);
+    if (reduce || !el.animate) return wait(250);
+    var a = el.animate([
+      { transform: 'translateY(-50px)', opacity: 0 },
+      { transform: 'translateY(0)', opacity: 1, offset: 0.3 },
+      { transform: 'translateY(0)', opacity: 1, offset: 0.45 },
+      { transform: 'translateY(150px)', opacity: 1, offset: 0.95 },
+      { transform: 'translateY(150px)', opacity: 0 }
+    ], { duration: 900, easing: 'ease-in-out' });
+    return a.finished.catch(function () {});
+  }
+
+  function scanCode(raw) {
+    var code = String(raw || '').replace(/\D/g, '');
+    if (code.length < 6 || code.length > 14) { setStatus('Barcodes have 6 to 14 digits. Check the number and try again.', true); return; }
+    if (S.scanning) return;
+    if (S.screen === 'battle' && S.power) { setStatus('Finish the battle before scanning another code.', true); return; }
+    S.scanning = true;
+    if (!S.power) { S.power = true; S.screen = 'scan'; render(); }
+    setStatus('Scanning ' + code + '…');
+    swipeAnim(code).then(function () {
+      var led = $('#led'); led.classList.remove('flash'); void led.offsetWidth; led.classList.add('flash');
+      tune([[880, 0.04], [1320, 0.06]]);
+      if (isItem(code)) {
+        var kind = ITEM_KINDS[fnv(code) % 3], full = S.items.length >= BAG_MAX;
+        if (!full) S.items.push(kind);
+        S.lastItem = { kind: kind, full: full }; S.screen = 'item';
+        setStatus(full ? 'That code is a ' + kind + ', but your bag is full. Use an item in battle first.' : 'That code is an item: ' + kind + '. It is in your bag for the next battle.', full);
+      } else {
+        var idx = -1;
+        for (var i = 0; i < S.roster.length; i++) if (S.roster[i].code === code) idx = i;
+        if (idx >= 0) { S.tag = 'IN ROSTER'; setStatus(S.roster[idx].name + ' is already in your roster.'); }
+        else { S.roster.push(derive(code)); idx = S.roster.length - 1; S.tag = 'NEW FIGHTER!'; setStatus(S.roster[idx].name + ' joined your roster. Press A to fight.'); }
+        S.view = S.active = idx; S.screen = 'reveal';
+      }
+      S.scanning = false; save(); render(); renderRoster();
+    });
+  }
+
+  $('#scanForm').addEventListener('submit', function (e) { e.preventDefault(); scanCode($('#code').value); });
+  $('#random').addEventListener('click', function () { var c = randomGtin(); $('#code').value = c; scanCode(c); });
+
+  $('#photo').addEventListener('change', function (e) {
+    var file = e.target.files && e.target.files[0]; e.target.value = '';
+    if (!file) return;
+    setStatus('Reading the photo…');
+    decodePhoto(file).then(function (text) {
+      $('#code').value = text; scanCode(text);
+    }).catch(function (err) {
+      setStatus(err && err.message === 'nodecoder'
+        ? 'The photo reader did not load. Type the digits instead.'
+        : 'No barcode found in that photo. Try a closer, sharper, well-lit shot.', true);
+    });
+  });
+
+  function decodePhoto(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var scale = Math.min(1, 1400 / Math.max(img.width, img.height));
+        var cv = document.createElement('canvas');
+        cv.width = Math.round(img.width * scale); cv.height = Math.round(img.height * scale);
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        URL.revokeObjectURL(url);
+        tryNative(cv).then(function (v) { if (v) return v; return tryZxing(cv); }).then(function (v) {
+          if (v && /\d{6,14}/.test(v.replace(/\D/g, ''))) resolve(v.replace(/\D/g, '')); else reject(new Error('notfound'));
+        }).catch(reject);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('notfound')); };
+      img.src = url;
+    });
+  }
+  function tryNative(cv) {
+    if (!('BarcodeDetector' in window)) return Promise.resolve(null);
+    try { return new window.BarcodeDetector().detect(cv).then(function (r) { return r.length ? r[0].rawValue : null; }).catch(function () { return null; }); }
+    catch (e) { return Promise.resolve(null); }
+  }
+  function tryZxing(cv) {
+    if (!window.ZXing) return Promise.reject(new Error('nodecoder'));
+    var hints = new Map(); hints.set(window.ZXing.DecodeHintType.TRY_HARDER, true);
+    var reader = new window.ZXing.BrowserMultiFormatReader(hints);
+    return reader.decodeFromImageUrl(cv.toDataURL('image/png')).then(function (r) { return r.getText(); }, function () { return null; });
+  }
+
+  // ---------- panel ----------
+  function renderCards() {
+    var root = $('#cards');
+    root.innerHTML = Object.keys(STARTERS).map(function (c) {
+      return '<button type="button" class="card" data-code="' + c + '" aria-label="Swipe ' + STARTERS[c].name + ' card">' + cardHTML(c, false) + '</button>';
+    }).join('');
+    paintCard(root, false);
+    root.querySelectorAll('.card').forEach(function (b) {
+      b.addEventListener('click', function () { var c = b.getAttribute('data-code'); $('#code').value = c; scanCode(c); });
+    });
+  }
+
+  function renderRoster() {
+    var ul = $('#roster');
+    $('#rosterEmpty').hidden = S.roster.length > 0;
+    ul.innerHTML = S.roster.map(function (f, i) {
+      return '<li><button type="button" class="rost' + (i === S.active ? ' is-active' : '') + '" data-i="' + i + '">' +
+        '<canvas data-i="' + i + '"></canvas>' +
+        '<span><b>' + f.name + '</b><span class="tchip t-' + f.type + '">' + f.type + '</span></span>' +
+        '<span class="meta">LV ' + f.lv + '<br>' + f.wins + (f.wins === 1 ? ' win' : ' wins') + '</span></button></li>';
+    }).join('');
+    ul.querySelectorAll('canvas').forEach(function (cv) { drawSprite(cv, S.roster[+cv.getAttribute('data-i')].shape, 3); });
+    ul.querySelectorAll('.rost').forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (S.screen === 'battle' && S.power) { setStatus('Finish the battle before switching fighters.', true); return; }
+        S.power = true; S.view = S.active = +b.getAttribute('data-i'); S.tag = null; S.screen = 'reveal';
+        save(); render(); renderRoster(); beep(660);
+      });
+    });
+  }
+
+  load();
+  renderCards();
+  renderRoster();
+  render();
+})();
+</script>

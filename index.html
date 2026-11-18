@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>BARBRAWL</title>
+  <meta name="description" content="Scan any barcode to get a fighter, then battle, collect items and level up.">
+  <meta name="theme-color" content="#2A3A9E">
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Space+Grotesk:wght@500;700&family=VT323&display=swap">
+</head>
+<body>
+  <div class="page">
+    <header class="masthead" id="masthead">
+      <h1>BARBRAWL</h1>
+      <p>Every barcode is a fighter. Scan one, then battle.</p>
+    </header>
+
+    <div class="layout">
+      <div class="device-col">
+        <div class="device-wrap" id="deviceWrap">
+          <div class="swipe" id="swipe" aria-hidden="true"></div>
+          <div class="shell">
+            <div class="slot"></div>
+            <div class="led" id="led"></div>
+            <span class="lbl lbl-scan">SCAN</span>
+            <span class="lbl lbl-swipe">▼ SWIPE CARD</span>
+            <div class="bezel"><div class="lcd" id="lcd" aria-live="polite"></div></div>
+            <div class="wordmark"><b>BARBRAWL</b><span class="lbl" style="letter-spacing:4px">SCAN · FIGHT · WIN</span></div>
+            <div class="dpad">
+              <button class="u" data-key="U" aria-label="Up">▲</button>
+              <button class="l" data-key="L" aria-label="Left">◀</button>
+              <span class="c"></span>
+              <button class="r" data-key="R" aria-label="Right">▶</button>
+              <button class="d" data-key="D" aria-label="Down">▼</button>
+            </div>
+            <div class="ab ab-b"><button class="round" data-key="B" aria-label="B: item or back">B</button><span class="lbl">ITEM</span></div>
+            <div class="ab ab-a"><button class="round" data-key="A" aria-label="A: fight or confirm">A</button><span class="lbl">FIGHT</span></div>
+            <div class="pills">
+              <div class="ab"><button class="pill" data-key="MODE" aria-label="Sound on or off"></button><span class="lbl">SOUND</span></div>
+              <div class="ab"><button class="pill" data-key="POWER" aria-label="Power"></button><span class="lbl">POWER</span></div>
+            </div>
+            <div class="grille" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+        </div>
+        <button type="button" class="btn camera" id="cameraBtn">
+          <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>
+          Scan with camera
+        </button>
+      </div>
+
+      <div class="panel">
+        <p class="status" id="status" aria-live="polite"></p>
+
+        <section>
+          <h2>Swipe a starter card</h2>
+          <p class="lede">Tap a card to slide it through the scanner.</p>
+          <div class="cards" id="cards"></div>
+        </section>
+
+        <section>
+          <h2>No camera handy?</h2>
+          <p class="lede">Type the digits under any barcode, or pick a photo of one.</p>
+          <form id="scanForm" class="scanrow" novalidate>
+            <div class="field">
+              <label for="code">Barcode digits</label>
+              <input id="code" name="code" inputmode="numeric" autocomplete="off" placeholder="e.g. 5012345678900" maxlength="20">
+            </div>
+            <div class="btns">
+              <button class="btn" type="submit">Scan</button>
+              <label class="btn ghost" for="photo">Photo<input class="sr" type="file" id="photo" accept="image/*"></label>
+              <button class="btn ghost" type="button" id="random">Random</button>
+            </div>
+          </form>
+        </section>
+
+        <section>
+          <h2>Your roster</h2>
+          <p class="empty" id="rosterEmpty">No fighters yet. Scan a barcode or swipe a starter card to get your first one.</p>
+          <ul class="roster" id="roster"></ul>
+        </section>
+
+        <section class="rules">
+          <h2>How to play</h2>
+          <dl class="keys">
+            <dt>A</dt><dd>Pick a fighter, start a battle, attack</dd>
+            <dt>B</dt><dd>Use the selected item in battle, or go back</dd>
+            <dt>D-pad</dt><dd>Browse your roster, or choose an item in battle</dd>
+          </dl>
+          <p><b>Types:</b> STORM beats SWAMP, SWAMP beats FLAME, FLAME beats STORM. A strong matchup hits for 1.5×.</p>
+          <p><b>Items:</b> about one barcode in nine is an item instead of a fighter: POTION heals, POWER raises attack, GUARD raises defense. Your bag holds five.</p>
+          <p><b>Rare codes:</b> real product barcodes get +10% stats. Codes with four repeated digits in a row, or that read the same backwards, get +30%.</p>
+          <p class="kb">On a keyboard: <kbd>Z</kbd> or <kbd>Enter</kbd> is A, <kbd>X</kbd> is B, arrows are the D-pad.</p>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="scanner" id="scanner" hidden role="dialog" aria-modal="true" aria-label="Barcode scanner">
+    <video id="scanVideo" playsinline muted></video>
+    <div class="scan-frame" aria-hidden="true"><span class="laser"></span></div>
+    <p class="scan-hint" id="scanHint" aria-live="polite"></p>
+    <div class="scan-bar">
+      <button type="button" class="btn ghost-dark" id="torch" hidden aria-pressed="false">Light</button>
+      <button type="button" class="btn" id="scanClose">Close</button>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
