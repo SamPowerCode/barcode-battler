@@ -23,7 +23,9 @@ The camera only works on secure pages. Chrome treats `localhost` as secure, so f
 
 - `src/game.js` – pure rules (barcode → fighter, damage, XP). Unit tested in `tests/`.
 - `src/scanner.js` – live camera scanner. Uses Chrome's built-in `BarcodeDetector`, falls back to a self-hosted zxing-wasm reader.
-- `src/main.js` – handheld UI, screens, battle flow, saving.
+- `src/main.js` – handheld UI, screens, battle flow, saving, two-player pairing UI.
+- `src/pvp.js` – two-player rules (pure, tested). The host phone runs the battle; the guest sends moves. Incoming data is rebuilt from barcodes and validated, never trusted.
+- `src/link.js` – WebRTC link via PeerJS. The free public PeerJS server only pairs the phones by room code; battle traffic goes phone to phone (or through PeerJS's TURN relay).
 - `scripts/make-icons.mjs` – regenerates `public/icons/*` (`npm run icons`).
 - `preview/artifact.html` – the single-file claude.ai preview (separate from the app).
 

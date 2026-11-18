@@ -3,8 +3,9 @@
 // self-hosted zxing-wasm build everywhere else (iPhone, desktop Firefox...).
 
 import { digitsOnly, isValidLength, validGtin } from './game.js';
+import { parseRoom } from './pvp.js';
 
-const FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'itf'];
+const FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'itf', 'qr_code'];
 let detectorPromise = null;
 
 export function getDetector() {
@@ -33,6 +34,7 @@ export function getDetector() {
 
 function pickCode(results) {
   for (const r of results) {
+    if (r.format === 'qr_code') continue; // QR codes on packaging are links, not fighters
     const c = digitsOnly(r.rawValue);
     if (isValidLength(c)) return c;
   }
@@ -61,12 +63,24 @@ function cameraError(err) {
   }
 }
 
+function pickRoom(results) {
+  for (const r of results) {
+    if (r.format !== 'qr_code') continue;
+    const room = parseRoom(r.rawValue);
+    if (room) return room;
+  }
+  return null;
+}
+
 /**
  * Open the full-screen scanner. Resolves with the digits of the first
- * barcode read, or null if the player closes it.
+ * barcode read (or, with { mode: 'qr' }, a battle room code), or null if
+ * the player closes it.
  */
-export function openScanner(ui) {
+export function openScanner(ui, { mode = 'barcode' } = {}) {
   const { root, video, hint, closeBtn, torchBtn } = ui;
+  const readyHint = mode === 'qr' ? "Point the camera at your friend's QR code" : 'Line the barcode up inside the box';
+  root.classList.toggle('qr', mode === 'qr');
   return new Promise((resolve) => {
     let stream = null;
     let done = false;
@@ -125,7 +139,14 @@ export function openScanner(ui) {
       if (done) return;
       if (video.readyState >= 2) {
         try {
-          const code = pickCode(await detector.detect(video));
+          const results = await detector.detect(video);
+          if (mode === 'qr') {
+            const room = pickRoom(results);
+            if (room) { navigator.vibrate?.(60); finish(room); return; }
+            timer = setTimeout(() => tick(detector), 100);
+            return;
+          }
+          const code = pickCode(results);
           // Real product codes carry a check digit, so one read is enough.
           // Anything else must read the same twice in a row.
           if (code && (validGtin(code) || code === last)) {
@@ -159,7 +180,7 @@ export function openScanner(ui) {
       try {
         const detector = await getDetector();
         if (done) return;
-        setHint('Line the barcode up inside the box');
+        setHint(readyHint);
         tick(detector);
       } catch {
         setHint('The barcode reader failed to load. Check your connection and try again.', true);

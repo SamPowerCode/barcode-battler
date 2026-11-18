@@ -6,6 +6,8 @@ import {
 } from './game.js';
 import { drawSprite, drawBars, LCD_INK } from './draw.js';
 import { openScanner, detectInImage } from './scanner.js';
+import { PROTOCOL, other, parseRoom, fighterFromWire, makePvpState, pvpStep, sanitizeState } from './pvp.js';
+import { hostRoom, joinRoom, linkErrorText } from './link.js';
 
 registerSW({ immediate: true });
 
@@ -22,6 +24,7 @@ const SAVE_KEY = 'barbrawl.v1';
 const S = {
   power: true, screen: 'scan', roster: [], items: [], active: -1, view: -1, sound: true,
   tag: null, battle: null, result: null, lastItem: null, itemSel: 0, scanning: false, timer: null,
+  pvp: null, notice: null,
 };
 
 function load() {
@@ -55,7 +58,17 @@ function render() {
   $('#led').classList.toggle('on', S.power);
   lcd.className = 'lcd';
   if (!S.power) { lcd.classList.add('off'); lcd.innerHTML = ''; return; }
-  ({ scan: scrScan, reveal: scrReveal, item: scrItem, battle: scrBattle, result: scrResult })[S.screen]();
+  ({ scan: scrScan, reveal: scrReveal, item: scrItem, battle: scrBattle, result: scrResult, notice: scrNotice })[S.screen]();
+}
+
+function scrNotice() {
+  lcd.classList.add('center');
+  const n = S.notice;
+  lcd.innerHTML = `
+    <div class="t16">LINK MODE</div>
+    <div class="t40">${n.title}</div>
+    ${n.lines.map((l) => `<div class="t22">${l}</div>`).join('')}
+    <div class="t16 blink">${n.hint || '&nbsp;'}</div>`;
 }
 
 function scrScan() {
@@ -101,7 +114,7 @@ function scrBattle() {
   const b = S.battle;
   const anim = b.anim;
   b.anim = null;
-  let hint = '. . .';
+  let hint = S.pvp && b.turn === 'foe' ? "FRIEND'S TURN" : '. . .';
   if (b.turn === 'you' && !b.busy) {
     hint = S.items.length
       ? `A:ATK  B:${S.items[S.itemSel % S.items.length]} (${S.items.length})${S.items.length > 1 ? ' &lt;&gt;' : ''}`
@@ -130,6 +143,7 @@ function scrResult() {
   lcd.innerHTML = `
     <div class="t52">${r.win ? 'YOU WIN!' : 'YOU LOSE'}</div>
     <canvas class="spr" id="sView"></canvas>
+    ${r.pvp ? '<div class="t16">VS FRIEND</div>' : ''}
     <div class="t20">${r.win ? 'BEAT' : 'LOST TO'} ${r.foe}</div>
     <div class="t22">+${r.gain} XP${r.to > r.from ? `  LV ${r.from} &gt; ${r.to}` : ''}</div>
     <div class="t16 blink">PRESS A</div>`;
@@ -285,8 +299,8 @@ function press(k) {
       S.screen = 'scan'; beep(660);
       break;
     case 'battle':
-      if (k === 'A') { attack(); return; }
-      if (k === 'B') { useItem(); return; }
+      if (k === 'A') { if (S.pvp) pvpAct('atk'); else attack(); return; }
+      if (k === 'B') { if (S.pvp) pvpAct('item'); else useItem(); return; }
       if (S.items.length > 1 && (back || fwd)) {
         S.itemSel = (S.itemSel + (back ? -1 : 1) + S.items.length) % S.items.length;
         beep(600, 0.03);
@@ -295,12 +309,22 @@ function press(k) {
     case 'result':
       if (k === 'A' || k === 'B') { S.view = S.active; S.tag = null; S.screen = 'reveal'; beep(660); }
       break;
+    case 'notice':
+      if (S.pvp) return; // waiting for the battle to start
+      if (k === 'A' || k === 'B') {
+        S.screen = S.roster.length ? 'reveal' : 'scan';
+        S.view = S.active >= 0 ? S.active : 0;
+        S.tag = null;
+        beep(660);
+      }
+      break;
   }
   render();
 }
 
 function togglePower() {
   clearTimeout(S.timer);
+  if (S.pvp) endLink(true);
   S.power = !S.power;
   S.battle = null;
   S.screen = 'scan';
@@ -313,6 +337,10 @@ document.querySelectorAll('[data-key]').forEach((b) => {
 });
 window.addEventListener('keydown', (e) => {
   if (document.body.classList.contains('scanning')) return;
+  if (document.body.classList.contains('sheet-open')) {
+    if (e.key === 'Escape') closeLink();
+    return;
+  }
   const t = e.target?.tagName;
   if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return;
   if (e.key === 'Enter' && (t === 'BUTTON' || t === 'LABEL')) return;
@@ -327,7 +355,14 @@ window.addEventListener('keydown', (e) => {
 const statusEl = $('#status');
 function setStatus(msg, err = false) { statusEl.textContent = msg; statusEl.classList.toggle('err', err); }
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-const busyForScan = () => S.power && S.screen === 'battle';
+const busyForScan = () => !!S.pvp || (S.power && S.screen === 'battle');
+
+/** Bring the handheld's screen into view (on phones the panel sits below it). */
+function showDevice() {
+  const r = $('#lcd').getBoundingClientRect();
+  if (r.top >= 0 && r.bottom <= window.innerHeight) return;
+  window.scrollTo({ top: 0, behavior: 'instant' });
+}
 
 function cardHTML(code) {
   const s = STARTERS[code];
@@ -367,6 +402,7 @@ async function scanCode(raw) {
   if (S.scanning) return;
   if (busyForScan()) { setStatus('Finish the battle before scanning another code.', true); return; }
   S.scanning = true;
+  showDevice();
   if (!S.power) { S.power = true; S.screen = 'scan'; render(); }
   setStatus(`Scanning ${code}…`);
   await swipeAnim(code);
@@ -464,10 +500,286 @@ function renderRoster() {
       S.tag = null;
       S.screen = 'reveal';
       save(); render(); renderRoster(); beep(660);
-      window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
+      showDevice();
     });
   });
 }
+
+// ---------- two players, two phones ----------
+// The host phone runs the battle (pvpStep) and sends every new state to the
+// guest; the guest sends only its moves. See src/pvp.js and src/link.js.
+
+const linkUI = {
+  root: $('#link'), choose: $('#linkChoose'), host: $('#linkHost'), status: $('#linkStatus'), fighter: $('#linkFighter'),
+  hostBtn: $('#hostBtn'), joinBtn: $('#joinBtn'), joinScan: $('#joinScan'), joinCode: $('#joinCode'),
+};
+let linkHandle = null; // pairing in progress (before the friend connects)
+let linkToken = 0; // bumps whenever pairing is cancelled, so late callbacks are ignored
+
+function setLinkStatus(msg, err = false) { linkUI.status.textContent = msg; linkUI.status.classList.toggle('err', err); }
+function myFighterIdx() {
+  if (S.active >= 0 && S.active < S.roster.length) return S.active;
+  return S.roster.length ? 0 : -1;
+}
+function setLinkButtons(enabled) {
+  for (const b of [linkUI.hostBtn, linkUI.joinBtn, linkUI.joinScan]) b.disabled = !enabled;
+}
+const joinUrl = (code) => `${location.origin}${location.pathname}#join-${code}`;
+
+function openLink(prefill) {
+  if (busyForScan()) { setStatus('Finish the battle first.', true); return; }
+  const i = myFighterIdx();
+  linkUI.root.hidden = false;
+  document.body.classList.add('sheet-open');
+  linkUI.choose.hidden = false;
+  linkUI.host.hidden = true;
+  setLinkStatus('');
+  if (i < 0) {
+    linkUI.fighter.textContent = 'You need a fighter first. Scan a barcode or swipe a starter card, then come back.';
+    setLinkButtons(false);
+  } else {
+    const f = S.roster[i];
+    linkUI.fighter.textContent = `You will fight with ${f.name} (LV ${f.lv}). To use a different fighter, close this and pick one on the device.`;
+    setLinkButtons(true);
+  }
+  if (prefill) {
+    linkUI.joinCode.value = prefill;
+    if (i >= 0) startJoin(prefill);
+  } else {
+    $('#linkClose').focus();
+  }
+}
+
+function closeLink() {
+  linkToken++;
+  linkHandle?.destroy();
+  linkHandle = null;
+  linkUI.root.hidden = true;
+  document.body.classList.remove('sheet-open');
+}
+
+async function startHost() {
+  const i = myFighterIdx();
+  if (i < 0) return;
+  const token = ++linkToken;
+  linkUI.choose.hidden = true;
+  linkUI.host.hidden = false;
+  $('#roomCode').textContent = '····';
+  $('#roomQR').getContext('2d').clearRect(0, 0, 200, 200);
+  setLinkStatus('Opening a room…');
+  try {
+    const handle = await hostRoom({
+      onCode: async (code) => {
+        if (token !== linkToken) return;
+        $('#roomCode').textContent = code;
+        setLinkStatus('Waiting for your friend to join…');
+        try {
+          const QR = (await import('qrcode')).default;
+          await QR.toCanvas($('#roomQR'), joinUrl(code), { width: 200, margin: 1, color: { dark: '#141626', light: '#FFFFFF' } });
+        } catch { /* the code alone still works */ }
+      },
+      onConnection: (conn) => { if (token === linkToken) beginPvp('host', conn, i); else conn.close(); },
+      onError: (err) => { if (token === linkToken) setLinkStatus(linkErrorText(err), true); },
+    });
+    if (token !== linkToken) handle.destroy(); else linkHandle = handle;
+  } catch {
+    if (token === linkToken) setLinkStatus('Could not load the connection code. Check your internet connection and try again.', true);
+  }
+}
+
+async function startJoin(raw) {
+  const i = myFighterIdx();
+  if (i < 0) return;
+  const code = parseRoom(raw);
+  if (!code) { setLinkStatus('Room codes are 4 letters and numbers, like KZ4Q.', true); return; }
+  linkHandle?.destroy();
+  const token = ++linkToken;
+  linkUI.joinCode.value = code;
+  setLinkButtons(false);
+  setLinkStatus(`Connecting to room ${code}…`);
+  const fail = (msg) => {
+    if (token !== linkToken) return;
+    linkHandle?.destroy();
+    linkHandle = null;
+    setLinkStatus(msg, true);
+    setLinkButtons(true);
+  };
+  try {
+    const handle = await joinRoom(code, {
+      onConnection: (conn) => { if (token === linkToken) beginPvp('guest', conn, i); else conn.close(); },
+      onError: (err) => fail(linkErrorText(err, code)),
+    });
+    if (token !== linkToken) handle.destroy(); else linkHandle = handle;
+  } catch {
+    fail('Could not load the connection code. Check your internet connection and try again.');
+  }
+}
+
+function beginPvp(role, conn, idx) {
+  const handle = linkHandle;
+  linkHandle = null;
+  linkToken++;
+  linkUI.root.hidden = true;
+  document.body.classList.remove('sheet-open');
+  clearTimeout(S.timer);
+  S.battle = null;
+  S.power = true;
+  S.pvp = { role, conn, handle, idx, state: null, lastSeq: -1, finished: false, waiting: false };
+  S.active = S.view = idx;
+  S.itemSel = 0;
+  save(); renderRoster();
+  conn.on('data', onLinkData);
+  conn.on('close', () => linkLost(false));
+  conn.on('error', () => linkLost(false));
+  const me = S.roster[idx];
+  if (role === 'guest') conn.send({ t: 'hello', v: PROTOCOL, code: me.code, lv: me.lv });
+  S.notice = { title: 'LINKED!', lines: [role === 'host' ? 'FRIEND JOINED' : 'CONNECTED', 'GET READY...'], hint: '' };
+  S.screen = 'notice';
+  render();
+  tune([[523, 0.06], [784, 0.06], [1047, 0.1]]);
+  buzz([30, 40, 30]);
+  setStatus('Connected to your friend. The battle is starting.');
+  showDevice();
+}
+
+function onLinkData(msg) {
+  const p = S.pvp;
+  if (!p || !msg || typeof msg !== 'object') return;
+  if (msg.t === 'bye') { linkLost(true, msg.reason); return; }
+  if (p.role === 'host') {
+    if (msg.t === 'hello' && !p.state) {
+      if (msg.v !== PROTOCOL) { try { p.conn.send({ t: 'bye', reason: 'version' }); } catch { /* closing anyway */ } linkLost(false, 'version'); return; }
+      const opp = fighterFromWire(msg);
+      if (!opp) { linkLost(false); return; }
+      applyPvp(makePvpState(S.roster[p.idx], opp));
+    } else if (msg.t === 'act' && p.state) {
+      const action = msg.a === 'item' && ITEMS[msg.kind] ? { a: 'item', kind: msg.kind } : { a: 'atk' };
+      applyPvp(pvpStep(p.state, 'guest', action));
+    }
+  } else if (msg.t === 'state') {
+    const s = sanitizeState(msg.s);
+    if (s && s.seq >= p.lastSeq) applyPvp(s);
+  }
+}
+
+function pvpView(s, mine) {
+  const view = (f) => ({ rec: { name: f.name, lv: f.lv, shape: f.shape, type: f.type }, cur: f.cur, max: f.max });
+  return { you: view(s[mine]), foe: view(s[other(mine)]), turn: s.turn === mine ? 'you' : 'foe', busy: false, msg: s.msg, anim: null };
+}
+
+function applyPvp(s) {
+  const p = S.pvp;
+  if (!p || s === p.state) return; // unchanged state: the move was not allowed
+  const isNew = s.seq > p.lastSeq;
+  p.state = s;
+  p.lastSeq = s.seq;
+  p.waiting = false;
+  if (p.role === 'host') { try { p.conn.send({ t: 'state', s }); } catch { /* close handler reports it */ } }
+  const b = pvpView(s, p.role);
+  if (isNew && s.anim) {
+    const target = s.anim.target === p.role ? 'you' : 'foe';
+    b.anim = { target, text: s.anim.text, shake: s.anim.shake };
+    if (s.anim.shake) {
+      beep(s.anim.crit ? 990 : 520, 0.07);
+      if (target === 'you') buzz(s.anim.crit ? [40, 40, 80] : 40);
+    } else if (s.anim.text === 'MISS') beep(180, 0.1);
+    else tune([[660, 0.05], [880, 0.08]]);
+  }
+  S.battle = b;
+  S.screen = 'battle';
+  render();
+  if (s.over && !p.finished) {
+    p.finished = true;
+    S.timer = setTimeout(() => finishPvp(s), 1000);
+  }
+}
+
+function pvpAct(a) {
+  const p = S.pvp;
+  const s = p?.state;
+  if (!s || s.over || s.turn !== p.role || p.waiting) return;
+  let action = { a: 'atk' };
+  if (a === 'item') {
+    if (!S.items.length) { S.battle.msg = 'BAG IS EMPTY'; beep(200, 0.08); render(); return; }
+    const kind = S.items.splice(S.itemSel % S.items.length, 1)[0];
+    S.itemSel = 0;
+    save();
+    action = { a: 'item', kind };
+  }
+  if (p.role === 'host') {
+    applyPvp(pvpStep(s, 'host', action));
+  } else {
+    p.waiting = true;
+    S.battle.busy = true;
+    render();
+    try { p.conn.send({ t: 'act', ...action }); } catch { linkLost(false); }
+  }
+}
+
+function finishPvp(s) {
+  const p = S.pvp;
+  if (!p) return;
+  const opp = s[other(p.role)];
+  const win = s.over === p.role;
+  const rec = S.roster[p.idx];
+  const gain = win ? xpForWin(opp.lv) : XP_FOR_LOSS;
+  const { from, to } = applyXp(rec, gain);
+  if (win) rec.wins++;
+  S.result = { win, gain, from, to, foe: opp.name, pvp: true };
+  S.battle = null;
+  S.screen = 'result';
+  endLink(false);
+  tune(win ? [[523, 0.08], [659, 0.08], [784, 0.08], [1047, 0.18]] : [[392, 0.12], [330, 0.12], [262, 0.24]]);
+  buzz(win ? [30, 60, 30, 60, 120] : 200);
+  setStatus(win ? `You beat your friend's ${opp.name}!` : `Your friend's ${opp.name} won this time.`);
+  save(); render(); renderRoster();
+}
+
+function endLink(sendBye) {
+  const p = S.pvp;
+  if (!p) return;
+  S.pvp = null;
+  if (sendBye) { try { p.conn.send({ t: 'bye' }); } catch { /* already gone */ } }
+  // Give the last message a moment to arrive before tearing down.
+  setTimeout(() => { try { p.conn.close(); } catch { /* ignore */ } p.handle?.destroy(); }, 600);
+}
+
+function linkLost(byFriend, reason) {
+  const p = S.pvp;
+  if (!p || p.finished) return;
+  endLink(false);
+  clearTimeout(S.timer);
+  S.battle = null;
+  S.notice = reason === 'version'
+    ? { title: 'UPDATE', lines: ['APPS DO NOT', 'MATCH'], hint: 'PRESS A' }
+    : { title: 'LINK LOST', lines: [byFriend ? 'FRIEND LEFT' : 'CONNECTION DROP', 'NO XP'], hint: 'PRESS A' };
+  S.screen = 'notice';
+  S.power = true;
+  render();
+  tune([[392, 0.12], [262, 0.24]]);
+  setStatus(reason === 'version'
+    ? 'Your phones are running different versions of BARBRAWL. Reload the app on both phones and try again.'
+    : 'The connection to your friend dropped, so nobody gets XP for that battle.', true);
+}
+
+$('#friendBtn').addEventListener('click', () => openLink());
+$('#linkClose').addEventListener('click', closeLink);
+linkUI.root.addEventListener('click', (e) => { if (e.target === linkUI.root) closeLink(); });
+linkUI.hostBtn.addEventListener('click', startHost);
+$('#joinForm').addEventListener('submit', (e) => { e.preventDefault(); startJoin(linkUI.joinCode.value); });
+linkUI.joinScan.addEventListener('click', async () => {
+  const room = await openScanner(scannerUI, { mode: 'qr' });
+  if (room) startJoin(room);
+});
+window.addEventListener('pagehide', () => { if (S.pvp) endLink(true); });
+
+function checkJoinLink() {
+  const code = parseRoom(location.hash);
+  if (!code) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  openLink(code);
+}
+window.addEventListener('hashchange', checkJoinLink);
 
 // ---------- fit the handheld to the phone screen ----------
 const deviceWrap = $('#deviceWrap');
@@ -477,7 +789,7 @@ function fitDevice() {
   const avail = deviceWrap.parentElement.clientWidth;
   let scale = Math.min(1, avail / DEVICE_W);
   if (window.innerWidth <= 720) {
-    const reserved = $('#masthead').offsetHeight + $('#cameraBtn').offsetHeight + 56;
+    const reserved = $('#masthead').offsetHeight + $('#cameraBtn').offsetHeight + $('#friendBtn').offsetHeight + 72;
     scale = Math.min(scale, (window.innerHeight - reserved) / DEVICE_H);
   }
   deviceWrap.style.zoom = String(Math.max(0.6, scale));
@@ -489,3 +801,4 @@ renderCards();
 renderRoster();
 render();
 fitDevice();
+checkJoinLink();

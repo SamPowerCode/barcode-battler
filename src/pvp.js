@@ -1,0 +1,126 @@
+// Two-player battle rules. Pure: no DOM, no networking.
+// The host phone owns the battle state and runs pvpStep for both players;
+// the guest only sends actions and renders the states it receives.
+
+import { TYPES, ITEMS, derive, eff, rollHit, r10, digitsOnly, isValidLength } from './game.js';
+
+export const PROTOCOL = 1;
+export const SIDES = ['host', 'guest'];
+export const other = (side) => (side === 'host' ? 'guest' : 'host');
+
+// No 0/O, 1/I/L, so codes are easy to read aloud and type.
+export const ROOM_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+export function randomRoom(rand = Math.random) {
+  let c = '';
+  for (let i = 0; i < 4; i++) c += ROOM_ALPHABET[Math.floor(rand() * ROOM_ALPHABET.length)];
+  return c;
+}
+/** Accepts "KZ4Q", "kz4q", or a join link ending in #join-KZ4Q. */
+export function parseRoom(text) {
+  const s = String(text ?? '').trim().toUpperCase();
+  const m = s.match(/#JOIN-([A-Z0-9]{4})$/) || s.match(/^([A-Z0-9]{4})$/);
+  if (!m) return null;
+  return [...m[1]].every((ch) => ROOM_ALPHABET.includes(ch)) ? m[1] : null;
+}
+
+const clampInt = (n, lo, hi) => Math.min(hi, Math.max(lo, Math.round(Number(n) || 0)));
+
+/**
+ * Rebuild a fighter from what the other phone sent. Only the barcode and the
+ * level are taken from the wire; name, type, sprite and stats come from derive().
+ */
+export function fighterFromWire(msg) {
+  const code = digitsOnly(msg?.code);
+  if (!isValidLength(code)) return null;
+  const f = derive(code);
+  f.lv = clampInt(msg.lv, 1, 99);
+  return f;
+}
+
+function side(f) {
+  const e = eff(f);
+  return { code: f.code, lv: f.lv, name: f.name, type: f.type, shape: f.shape, max: e.hp, cur: e.hp, st: e.st, df: e.df };
+}
+
+export function makePvpState(hostFighter, guestFighter, rand = Math.random) {
+  return {
+    v: PROTOCOL,
+    seq: 0,
+    host: side(hostFighter),
+    guest: side(guestFighter),
+    turn: rand() < 0.5 ? 'host' : 'guest',
+    msg: 'FIGHT!',
+    anim: null,
+    over: null,
+  };
+}
+
+/** Apply one action by `who`. Returns a new state (or the same one if the move is not allowed). */
+export function pvpStep(state, who, action, rand = Math.random) {
+  if (state.over || state.turn !== who || !SIDES.includes(who)) return state;
+  const s = structuredClone(state);
+  const me = s[who];
+  const opp = s[other(who)];
+  s.seq++;
+  s.anim = null;
+
+  if (action?.a === 'item' && ITEMS[action.kind]) {
+    if (action.kind === 'POTION') {
+      const h = r10(me.max * 0.4);
+      me.cur = Math.min(me.max, me.cur + h);
+      s.msg = `POTION! +${h} HP`;
+      s.anim = { target: who, text: `+${h}`, shake: false };
+    } else if (action.kind === 'POWER') {
+      me.st = r10(me.st * 1.3);
+      s.msg = `POWER! ST ${me.st}`;
+    } else {
+      me.df = r10(me.df * 1.3);
+      s.msg = `GUARD! DF ${me.df}`;
+    }
+  } else {
+    const h = rollHit({ type: me.type, st: me.st }, { type: opp.type, df: opp.df }, rand);
+    if (h.miss) {
+      s.msg = `${me.name} MISSED!`;
+      s.anim = { target: other(who), text: 'MISS', shake: false };
+    } else {
+      opp.cur = Math.max(0, opp.cur - h.dmg);
+      const tag = h.crit ? ' CRIT!' : h.mult > 1 ? ' SUPER!' : h.mult < 1 ? ' WEAK' : '';
+      s.msg = `${me.name} -${h.dmg}${tag}`;
+      s.anim = { target: other(who), text: `-${h.dmg}`, shake: true, crit: h.crit };
+    }
+  }
+
+  if (opp.cur <= 0) s.over = who;
+  else s.turn = other(who);
+  return s;
+}
+
+const MSG_OK = /^[A-Z0-9 !+\-.]{1,24}$/;
+
+/** Guest side: accept a state from the host only in a safe, well-formed shape. */
+export function sanitizeState(raw) {
+  if (!raw || raw.v !== PROTOCOL) return null;
+  const out = { v: PROTOCOL, seq: clampInt(raw.seq, 0, 1e6) };
+  for (const k of SIDES) {
+    const f = fighterFromWire(raw[k]);
+    if (!f) return null;
+    const base = side(f);
+    const p = raw[k];
+    base.max = clampInt(p.max, 1, 1e6);
+    base.cur = clampInt(p.cur, 0, base.max);
+    base.st = clampInt(p.st, 0, 1e6);
+    base.df = clampInt(p.df, 0, 1e6);
+    out[k] = base;
+  }
+  if (!SIDES.includes(raw.turn)) return null;
+  out.turn = raw.turn;
+  out.over = SIDES.includes(raw.over) ? raw.over : null;
+  out.msg = typeof raw.msg === 'string' && MSG_OK.test(raw.msg) ? raw.msg : '...';
+  const a = raw.anim;
+  out.anim = a && SIDES.includes(a.target) && typeof a.text === 'string' && /^[A-Z0-9+\-]{1,6}$/.test(a.text)
+    ? { target: a.target, text: a.text, shake: !!a.shake, crit: !!a.crit }
+    : null;
+  return out;
+}
+
+export { TYPES };

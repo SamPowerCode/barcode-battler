@@ -50,6 +50,10 @@
           <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>
           Scan with camera
         </button>
+        <button type="button" class="btn ghost friend" id="friendBtn">
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="7" height="14" rx="2"/><rect x="15" y="5" width="7" height="14" rx="2"/><path d="M10.5 10h3M12 8.5l1.5 1.5-1.5 1.5M13.5 14h-3M12 12.5 10.5 14l1.5 1.5"/></svg>
+          Battle a friend
+        </button>
       </div>
 
       <div class="panel">
@@ -93,9 +97,51 @@
           <p><b>Types:</b> STORM beats SWAMP, SWAMP beats FLAME, FLAME beats STORM. A strong matchup hits for 1.5×.</p>
           <p><b>Items:</b> about one barcode in nine is an item instead of a fighter: POTION heals, POWER raises attack, GUARD raises defense. Your bag holds five.</p>
           <p><b>Rare codes:</b> real product barcodes get +10% stats. Codes with four repeated digits in a row, or that read the same backwards, get +30%.</p>
+          <p><b>Two players:</b> tap <b>Battle a friend</b> on both phones. One hosts and shows a room code; the other joins with it. You take turns, each using your own fighter and items, and the winner earns XP.</p>
           <p class="kb">On a keyboard: <kbd>Z</kbd> or <kbd>Enter</kbd> is A, <kbd>X</kbd> is B, arrows are the D-pad.</p>
         </section>
       </div>
+    </div>
+  </div>
+
+  <div class="sheet" id="link" hidden role="dialog" aria-modal="true" aria-labelledby="linkTitle">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <h2 id="linkTitle">Battle a friend</h2>
+        <button type="button" class="icon-btn" id="linkClose" aria-label="Close">
+          <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <p class="lede" id="linkFighter"></p>
+
+      <div class="link-choose" id="linkChoose">
+        <div class="link-option">
+          <h3>Start a room</h3>
+          <p>You get a code to show your friend.</p>
+          <button type="button" class="btn" id="hostBtn">Host a battle</button>
+        </div>
+        <div class="link-option">
+          <h3>Join a friend</h3>
+          <form class="join-row" id="joinForm" novalidate>
+            <div class="field">
+              <label for="joinCode">Room code</label>
+              <input id="joinCode" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="KZ4Q">
+            </div>
+            <button type="submit" class="btn" id="joinBtn">Join</button>
+            <button type="button" class="btn ghost" id="joinScan">Scan QR</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="link-host" id="linkHost" hidden>
+        <p class="room-label">Room code</p>
+        <p class="room-code" id="roomCode">····</p>
+        <canvas id="roomQR" width="200" height="200" aria-label="QR code that opens this battle room" role="img"></canvas>
+        <p class="lede">On their phone, your friend taps <b>Battle a friend</b> and enters the code or scans this QR. Their normal camera app works too.</p>
+      </div>
+
+      <p class="status" id="linkStatus" aria-live="polite"></p>
+      <p class="fineprint">A free public service (PeerJS) introduces the two phones. After that, the battle goes directly between them.</p>
     </div>
   </div>
 
