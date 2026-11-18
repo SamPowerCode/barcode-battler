@@ -4,7 +4,9 @@
 
 import { TYPES, ITEMS, derive, eff, rollHit, r10, digitsOnly, isValidLength } from './game.js';
 
-export const PROTOCOL = 1;
+export const PROTOCOL = 2;
+export const TURN_MS = 15000; // time each player has to act
+export const MAX_IDLE = 3; // timeouts in a row before a player forfeits
 export const SIDES = ['host', 'guest'];
 export const other = (side) => (side === 'host' ? 'guest' : 'host');
 
@@ -51,22 +53,39 @@ export function makePvpState(hostFighter, guestFighter, rand = Math.random, roun
     host: side(hostFighter),
     guest: side(guestFighter),
     turn: rand() < 0.5 ? 'host' : 'guest',
+    turnMs: TURN_MS,
+    idle: { host: 0, guest: 0 },
     msg: 'FIGHT!',
     anim: null,
     over: null,
+    forfeit: null,
   };
 }
 
-/** Apply one action by `who`. Returns a new state (or the same one if the move is not allowed). */
+/**
+ * Apply one action by `who`: { a: 'atk' }, { a: 'item', kind }, or { a: 'timeout' }
+ * (the turn clock ran out: an automatic attack, and MAX_IDLE in a row forfeits).
+ * Returns a new state, or the same one if the move is not allowed.
+ */
 export function pvpStep(state, who, action, rand = Math.random) {
   if (state.over || state.turn !== who || !SIDES.includes(who)) return state;
   const s = structuredClone(state);
   const me = s[who];
   const opp = s[other(who)];
+  const timedOut = action?.a === 'timeout';
   s.seq++;
   s.anim = null;
+  s.idle = { host: 0, guest: 0, ...s.idle };
+  s.idle[who] = timedOut ? s.idle[who] + 1 : 0;
 
-  if (action?.a === 'item' && ITEMS[action.kind]) {
+  if (timedOut && s.idle[who] >= MAX_IDLE) {
+    s.over = other(who);
+    s.forfeit = who;
+    s.msg = `${me.name} FORFEITS!`;
+    return s;
+  }
+
+  if (!timedOut && action?.a === 'item' && ITEMS[action.kind]) {
     if (action.kind === 'POTION') {
       const h = r10(me.max * 0.4);
       me.cur = Math.min(me.max, me.cur + h);
@@ -87,7 +106,7 @@ export function pvpStep(state, who, action, rand = Math.random) {
     } else {
       opp.cur = Math.max(0, opp.cur - h.dmg);
       const tag = h.crit ? ' CRIT!' : h.mult > 1 ? ' SUPER!' : h.mult < 1 ? ' WEAK' : '';
-      s.msg = `${me.name} -${h.dmg}${tag}`;
+      s.msg = timedOut ? `${me.name} AUTO -${h.dmg}` : `${me.name} -${h.dmg}${tag}`;
       s.anim = { target: other(who), text: `-${h.dmg}`, shake: true, crit: h.crit };
     }
   }
@@ -116,7 +135,10 @@ export function sanitizeState(raw) {
   }
   if (!SIDES.includes(raw.turn)) return null;
   out.turn = raw.turn;
+  out.turnMs = clampInt(raw.turnMs, 3000, 60000);
+  out.idle = { host: clampInt(raw.idle?.host, 0, MAX_IDLE), guest: clampInt(raw.idle?.guest, 0, MAX_IDLE) };
   out.over = SIDES.includes(raw.over) ? raw.over : null;
+  out.forfeit = out.over && SIDES.includes(raw.forfeit) ? raw.forfeit : null;
   out.msg = typeof raw.msg === 'string' && MSG_OK.test(raw.msg) ? raw.msg : '...';
   const a = raw.anim;
   out.anim = a && SIDES.includes(a.target) && typeof a.text === 'string' && /^[A-Z0-9+\-]{1,6}$/.test(a.text)

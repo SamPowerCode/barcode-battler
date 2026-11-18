@@ -134,7 +134,9 @@ function scrBattle() {
     <div class="row t20"><span>${b.you.rec.name} L${b.you.rec.lv}</span><span>${b.you.cur}</span></div>
     ${segs(b.you.cur, b.you.max)}
     <div class="box t20">${b.msg}</div>
-    <div class="t16">${hint}</div>`;
+    ${S.pvp
+      ? `<div class="row t16"><span>${hint}</span><span id="turnClock" class="clock">${clockText()}</span></div>`
+      : `<div class="t16">${hint}</div>`}`;
   drawSprite($('#sFoe'), b.foe.rec.shape, 5);
   drawSprite($('#sYou'), b.you.rec.shape, 6);
 }
@@ -697,10 +699,60 @@ function onLinkData(msg) {
   }
 }
 
+// ---------- turn timer ----------
+// Both phones show the countdown; only the host enforces it (a timeout is
+// just another pvpStep, broadcast like any move).
+const clock = { deadline: 0, interval: null, hostTimer: null, lastSec: null };
+
+function clockSecondsLeft() { return Math.max(0, Math.ceil((clock.deadline - Date.now()) / 1000)); }
+function clockText() { return clock.deadline ? String(clockSecondsLeft()).padStart(2, '0') : ''; }
+
+function stopTurnClock() {
+  clearInterval(clock.interval);
+  clearTimeout(clock.hostTimer);
+  clock.interval = clock.hostTimer = null;
+  clock.deadline = 0;
+  clock.lastSec = null;
+}
+
+function startTurnClock(s) {
+  stopTurnClock();
+  const p = S.pvp;
+  if (!p || s.over) return;
+  clock.deadline = Date.now() + s.turnMs;
+  clock.interval = setInterval(tickTurnClock, 200);
+  tickTurnClock();
+  if (p.role === 'host') {
+    const { seq, round } = s;
+    clock.hostTimer = setTimeout(() => {
+      const cur = S.pvp?.state;
+      if (!cur || cur.over || cur.seq !== seq || cur.round !== round) return;
+      applyPvp(pvpStep(cur, cur.turn, { a: 'timeout' }));
+    }, s.turnMs);
+  }
+}
+
+function tickTurnClock() {
+  const secs = clockSecondsLeft();
+  const el = document.getElementById('turnClock');
+  if (el) {
+    el.textContent = String(secs).padStart(2, '0');
+    el.classList.toggle('urgent', secs <= 5);
+  }
+  const p = S.pvp;
+  const myTurn = p?.state && !p.state.over && p.state.turn === p.role && !p.waiting;
+  if (myTurn && secs <= 5 && secs > 0 && secs !== clock.lastSec) {
+    beep(secs <= 3 ? 1320 : 990, 0.03);
+    if (secs <= 3) buzz(15);
+  }
+  clock.lastSec = secs;
+}
+
 // ---------- rematches ----------
 function resetRound(round) {
   const p = S.pvp;
   clearTimeout(S.timer);
+  stopTurnClock();
   Object.assign(p, { round, lastSeq: -1, finished: false, waiting: false, phase: 'battle', myAgain: false, peerAgain: null });
   S.itemSel = 0;
   setStatus('Rematch! The battle is starting.');
@@ -754,6 +806,7 @@ function applyPvp(s) {
   const p = S.pvp;
   if (!p || s === p.state) return; // unchanged state: the move was not allowed
   const isNew = s.seq > p.lastSeq;
+  const prevIdle = p.state?.round === s.round ? p.state.idle?.[p.role] ?? 0 : 0;
   p.state = s;
   p.lastSeq = s.seq;
   p.waiting = false;
@@ -768,8 +821,15 @@ function applyPvp(s) {
     } else if (s.anim.text === 'MISS') beep(180, 0.1);
     else tune([[660, 0.05], [880, 0.08]]);
   }
+  const myIdle = s.idle?.[p.role] ?? 0;
+  if (isNew && myIdle > prevIdle && !s.over) {
+    setStatus(`You ran out of time, so ${s[p.role].name} attacked automatically. ${myIdle} of 3: three in a row forfeits the battle.`, true);
+  } else if (isNew && myIdle === 0 && prevIdle > 0) {
+    setStatus('');
+  }
   S.battle = b;
   S.screen = 'battle';
+  if (isNew) startTurnClock(s);
   render();
   if (s.over && !p.finished) {
     p.finished = true;
@@ -781,6 +841,7 @@ function pvpAct(a) {
   const p = S.pvp;
   const s = p?.state;
   if (!s || s.over || s.turn !== p.role || p.waiting) return;
+  if (p.role === 'guest' && clock.deadline && Date.now() >= clock.deadline) return; // too late; the host has moved on
   let action = { a: 'atk' };
   if (a === 'item') {
     if (!S.items.length) { S.battle.msg = 'BAG IS EMPTY'; beep(200, 0.08); render(); return; }
@@ -811,14 +872,17 @@ function finishPvp(s) {
   S.result = { win, gain, from, to, foe: opp.name, pvp: true };
   S.battle = null;
   S.screen = 'result';
+  stopTurnClock();
   // Keep the link open for a rematch, unless it already dropped.
   if (p.closed) endLink(false);
   else { p.phase = 'post'; p.myAgain = false; } // keep peerAgain: the friend may already have asked
   updateFriendBtn();
   tune(win ? [[523, 0.08], [659, 0.08], [784, 0.08], [1047, 0.18]] : [[392, 0.12], [330, 0.12], [262, 0.24]]);
   buzz(win ? [30, 60, 30, 60, 120] : 200);
-  setStatus((win ? `You beat your friend's ${opp.name}!` : `Your friend's ${opp.name} won this time.`)
-    + (S.pvp ? ' Press A for a rematch, or B to leave.' : ''));
+  let summary = win ? `You beat your friend's ${opp.name}!` : `Your friend's ${opp.name} won this time.`;
+  if (s.forfeit === p.role) summary = 'You ran out of time three turns in a row, so you forfeited.';
+  else if (s.forfeit) summary = 'Your friend ran out of time three turns in a row, so you win.';
+  setStatus(summary + (S.pvp ? ' Press A for a rematch, or B to leave.' : ''), s.forfeit === p.role);
   save(); render(); renderRoster();
 }
 
@@ -826,6 +890,7 @@ function endLink(sendBye, reason) {
   const p = S.pvp;
   if (!p) return;
   S.pvp = null;
+  stopTurnClock();
   updateFriendBtn();
   if (sendBye) { try { p.conn.send(reason ? { t: 'bye', reason } : { t: 'bye' }); } catch { /* already gone */ } }
   // Give the last message a moment to arrive before tearing down.

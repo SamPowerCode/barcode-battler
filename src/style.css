@@ -137,6 +137,9 @@ button, label.btn { font: inherit; touch-action: manipulation; }
 .dmg.foe { right: 78px; top: 10px; }
 .dmg.you { left: 86px; bottom: 14px; }
 .rev { display: flex; gap: 14px; align-items: center; flex: 1; }
+.clock { font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right; }
+.clock.urgent { background: var(--lcd-ink); color: var(--lcd); padding: 0 4px; animation: blink 0.5s steps(2, start) infinite; }
+@media (prefers-reduced-motion: reduce) { .clock.urgent { animation: none; } }
 .stats { display: flex; flex-direction: column; gap: 3px; }
 .blink { animation: blink 1s steps(2, start) infinite; }
 @keyframes blink { to { visibility: hidden; } }

@@ -74,6 +74,40 @@ describe('pvp battle', () => {
   });
 });
 
+describe('turn timer', () => {
+  const start = () => makePvpState(derive(VOLT), derive(GRUB), () => 0.1); // host first
+
+  it('auto-attacks when the clock runs out and passes the turn', () => {
+    const s = pvpStep(start(), 'host', { a: 'timeout' }, () => 0.5);
+    expect(s.turn).toBe('guest');
+    expect(s.idle.host).toBe(1);
+    expect(s.guest.cur).toBeLessThan(s.guest.max);
+    expect(s.msg).toMatch(/^VOLTMAW AUTO -\d+$/);
+  });
+
+  it('resets the idle count when the player acts', () => {
+    let s = pvpStep(start(), 'host', { a: 'timeout' }, () => 0.5);
+    s = pvpStep(s, 'guest', { a: 'atk' }, () => 0.5);
+    s = pvpStep(s, 'host', { a: 'atk' }, () => 0.5);
+    expect(s.idle.host).toBe(0);
+  });
+
+  it('forfeits after three timeouts in a row', () => {
+    let s = start();
+    s.host.cur = s.guest.cur = 1e6; s.host.max = s.guest.max = 1e6; // nobody gets knocked out
+    for (let i = 0; i < 2; i++) {
+      s = pvpStep(s, 'host', { a: 'timeout' }, () => 0.5);
+      s = pvpStep(s, 'guest', { a: 'atk' }, () => 0.5);
+    }
+    expect(s.idle.host).toBe(2);
+    s = pvpStep(s, 'host', { a: 'timeout' }, () => 0.5);
+    expect(s.over).toBe('guest');
+    expect(s.forfeit).toBe('host');
+    expect(s.msg).toBe('VOLTMAW FORFEITS!');
+    expect(sanitizeState(JSON.parse(JSON.stringify(s)))).toEqual(s);
+  });
+});
+
 describe('rematch rounds', () => {
   it('carries the round number and keeps it through sanitizing', () => {
     const s = makePvpState(derive(VOLT), derive(GRUB), () => 0.1, 3);
