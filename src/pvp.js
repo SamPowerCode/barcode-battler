@@ -2,7 +2,7 @@
 // The host phone owns the battle state and runs pvpStep for both players;
 // the guest only sends actions and renders the states it receives.
 
-import { TYPES, ITEMS, derive, eff, rollHit, r10, digitsOnly, isValidLength } from './game.js';
+import { TYPES, ITEMS, derive, eff, rollHit, applyItem, digitsOnly, isValidLength } from './game.js';
 
 export const PROTOCOL = 2;
 export const TURN_MS = 15000; // time each player has to act
@@ -86,18 +86,9 @@ export function pvpStep(state, who, action, rand = Math.random) {
   }
 
   if (!timedOut && action?.a === 'item' && ITEMS[action.kind]) {
-    if (action.kind === 'POTION') {
-      const h = r10(me.max * 0.4);
-      me.cur = Math.min(me.max, me.cur + h);
-      s.msg = `POTION! +${h} HP`;
-      s.anim = { target: who, text: `+${h}`, shake: false };
-    } else if (action.kind === 'POWER') {
-      me.st = r10(me.st * 1.3);
-      s.msg = `POWER! ST ${me.st}`;
-    } else {
-      me.df = r10(me.df * 1.3);
-      s.msg = `GUARD! DF ${me.df}`;
-    }
+    const { msg, heal } = applyItem(me, action.kind);
+    s.msg = msg;
+    if (heal) s.anim = { target: who, text: `+${heal}`, shake: false };
   } else {
     const h = rollHit({ type: me.type, st: me.st }, { type: opp.type, df: opp.df }, rand);
     if (h.miss) {

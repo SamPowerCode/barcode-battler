@@ -144,3 +144,47 @@ export function applyXp(f, gain) {
   while (f.xp >= f.lv * 100) { f.xp -= f.lv * 100; f.lv++; }
   return { from, to: f.lv };
 }
+
+/**
+ * Use an item on a battle side { max, cur, st, df } (mutates it).
+ * Returns { msg, heal } where heal is the potion's nominal heal (0 for boosts).
+ */
+export function applyItem(side, kind) {
+  if (kind === 'POTION') {
+    const h = r10(side.max * 0.4);
+    side.cur = Math.min(side.max, side.cur + h);
+    return { msg: `POTION! +${h} HP`, heal: h };
+  }
+  if (kind === 'POWER') { side.st = r10(side.st * 1.3); return { msg: `POWER! ST ${side.st}`, heal: 0 }; }
+  side.df = r10(side.df * 1.3);
+  return { msg: `GUARD! DF ${side.df}`, heal: 0 };
+}
+
+/** Typical damage of one hit (no miss, no crit). att: { type, st }, def: { type, df }. */
+export function expectedHit(att, def) {
+  return Math.max(40, r10(att.st * typeMult(att.type, def.type) - def.df * 0.45));
+}
+
+/** Items a wild foe carries: more at higher levels, at most 3. */
+export function cpuBag(lv, rand = Math.random) {
+  const n = Math.min(3, Math.floor(lv / 3) + (rand() < 0.5 ? 1 : 0));
+  return Array.from({ length: n }, () => ITEM_KINDS[Math.floor(rand() * ITEM_KINDS.length)]);
+}
+
+/**
+ * Pick the CPU's move. me/opp: { type, max, cur, st, df }; me.used lists boosts already taken.
+ * Returns an item kind from bag to use, or null to attack.
+ */
+export function cpuChoice(me, opp, bag, rand = Math.random) {
+  if (!bag.length) return null;
+  const mine = expectedHit(me, opp);
+  if (mine >= opp.cur) return null; // go for the knockout
+  const theirs = expectedHit(opp, me);
+  const used = me.used || [];
+  const has = (k) => bag.includes(k);
+  const missing = me.max - me.cur;
+  if (has('POTION') && missing >= me.max * 0.25 && (me.cur <= theirs * 1.5 || me.cur <= me.max * 0.35)) return 'POTION';
+  if (has('GUARD') && !used.includes('GUARD') && theirs >= me.max * 0.2 && me.cur > me.max * 0.5 && rand() < 0.7) return 'GUARD';
+  if (has('POWER') && !used.includes('POWER') && opp.cur > mine * 2.5 && rand() < 0.6) return 'POWER';
+  return null;
+}

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   checkDigit, validGtin, derive, eff, isItem, randomGtin, rollHit, typeMult, applyXp, isRare, STARTERS, mulberry,
+  applyItem, expectedHit, cpuBag, cpuChoice,
 } from '../src/game.js';
 
 describe('barcodes', () => {
@@ -84,5 +85,55 @@ describe('battle', () => {
     const f = { lv: 1, xp: 90 };
     expect(applyXp(f, 150)).toEqual({ from: 1, to: 2 });
     expect(f.xp).toBe(140);
+  });
+});
+
+describe('items', () => {
+  it('heals 40% capped at max and boosts stats 30%', () => {
+    const side = { max: 1000, cur: 900, st: 500, df: 300 };
+    expect(applyItem(side, 'POTION')).toEqual({ msg: 'POTION! +400 HP', heal: 400 });
+    expect(side.cur).toBe(1000);
+    expect(applyItem(side, 'POWER').heal).toBe(0);
+    expect(side.st).toBe(650);
+    applyItem(side, 'GUARD');
+    expect(side.df).toBe(390);
+  });
+});
+
+describe('cpu', () => {
+  const always = () => 0; // rand() < p is always true
+  const never = () => 0.99;
+  const side = (o) => ({ type: 'STORM', max: 2000, cur: 2000, st: 600, df: 400, used: [], ...o });
+
+  it('gives bigger bags at higher levels, capped at 3', () => {
+    expect(cpuBag(1, never)).toHaveLength(0);
+    expect(cpuBag(1, always)).toHaveLength(1);
+    expect(cpuBag(6, never)).toHaveLength(2);
+    expect(cpuBag(20, always)).toHaveLength(3);
+    for (const k of cpuBag(9, Math.random)) expect(['POTION', 'POWER', 'GUARD']).toContain(k);
+  });
+
+  it('estimates hits with type advantage and a 40 floor', () => {
+    expect(expectedHit({ type: 'STORM', st: 600 }, { type: 'SWAMP', df: 400 })).toBe(720);
+    expect(expectedHit({ type: 'STORM', st: 100 }, { type: 'FLAME', df: 900 })).toBe(40);
+  });
+
+  it('attacks when the bag is empty or a hit would knock out', () => {
+    expect(cpuChoice(side({ cur: 100 }), side(), [], always)).toBe(null);
+    expect(cpuChoice(side({ cur: 100 }), side({ cur: 200 }), ['POTION'], always)).toBe(null);
+  });
+
+  it('drinks a potion when in danger', () => {
+    expect(cpuChoice(side({ cur: 500 }), side(), ['POWER', 'POTION'], always)).toBe('POTION');
+    expect(cpuChoice(side({ cur: 1900 }), side(), ['POTION'], always)).toBe(null);
+  });
+
+  it('guards against heavy hitters and powers up for long fights, once each', () => {
+    const brute = side({ st: 1200 });
+    expect(cpuChoice(side(), brute, ['GUARD'], always)).toBe('GUARD');
+    expect(cpuChoice(side({ used: ['GUARD'] }), brute, ['GUARD'], always)).toBe(null);
+    expect(cpuChoice(side(), side(), ['POWER'], always)).toBe('POWER');
+    expect(cpuChoice(side({ used: ['POWER'] }), side(), ['POWER'], always)).toBe(null);
+    expect(cpuChoice(side(), side(), ['POWER'], never)).toBe(null);
   });
 });

@@ -2,7 +2,7 @@ import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import {
   STARTERS, ITEMS, BAG_MAX, derive, eff, isItem, itemKind, randomGtin, rollHit, xpForWin, XP_FOR_LOSS,
-  applyXp, r10, digitsOnly, isValidLength,
+  applyXp, applyItem, cpuBag, cpuChoice, digitsOnly, isValidLength,
 } from './game.js';
 import { drawSprite, drawBars, LCD_INK } from './draw.js';
 import { openScanner, detectInImage } from './scanner.js';
@@ -124,7 +124,7 @@ function scrBattle() {
   }
   const shake = (t) => (anim && anim.shake && anim.target === t ? ' shake' : '');
   lcd.innerHTML = `
-    <div class="row t20"><span>${b.foe.rec.name} L${b.foe.rec.lv}</span><span>${b.foe.cur}</span></div>
+    <div class="row t20"><span>${b.foe.rec.name} L${b.foe.rec.lv}${b.foe.bag?.length ? ` <span class="t16">BAG ${b.foe.bag.length}</span>` : ''}</span><span>${b.foe.cur}</span></div>
     ${segs(b.foe.cur, b.foe.max)}
     <div class="arena">
       <canvas id="sFoe" class="spr foe${shake('foe')}"></canvas>
@@ -185,7 +185,7 @@ function startBattle() {
   const fe = eff(foe);
   S.battle = {
     you: { rec: you, st: ye.st, df: ye.df, max: ye.hp, cur: ye.hp },
-    foe: { rec: foe, st: fe.st, df: fe.df, max: fe.hp, cur: fe.hp },
+    foe: { rec: foe, st: fe.st, df: fe.df, max: fe.hp, cur: fe.hp, bag: cpuBag(foe.lv), used: [] },
     turn: 'you', busy: false, msg: `${foe.name} APPEARS!`, anim: null,
   };
   S.itemSel = 0;
@@ -223,7 +223,18 @@ function endPlayerTurn() {
 function foeAct() {
   const b = S.battle;
   if (!b) return;
-  hit(b.foe, b.you, 'you');
+  const f = b.foe;
+  const kind = cpuChoice({ ...f, type: f.rec.type }, { ...b.you, type: b.you.rec.type }, f.bag);
+  if (kind) {
+    f.bag.splice(f.bag.indexOf(kind), 1);
+    f.used.push(kind);
+    const { heal } = applyItem(f, kind);
+    b.msg = `${f.rec.name} USES ${kind}`;
+    b.anim = heal ? { target: 'foe', text: `+${heal}`, shake: false } : null;
+    tune([[523, 0.05], [392, 0.08]]);
+  } else {
+    hit(f, b.you, 'you');
+  }
   if (b.you.cur <= 0) { render(); S.timer = setTimeout(() => finish(false), 1000); return; }
   b.turn = 'you';
   b.busy = false;
@@ -243,18 +254,9 @@ function useItem() {
   if (!S.items.length) { b.msg = 'BAG IS EMPTY'; beep(200, 0.08); render(); return; }
   const kind = S.items.splice(S.itemSel % S.items.length, 1)[0];
   S.itemSel = 0;
-  if (kind === 'POTION') {
-    const h = r10(b.you.max * 0.4);
-    b.you.cur = Math.min(b.you.max, b.you.cur + h);
-    b.msg = `POTION! +${h} HP`;
-    b.anim = { target: 'you', text: `+${h}`, shake: false };
-  } else if (kind === 'POWER') {
-    b.you.st = r10(b.you.st * 1.3);
-    b.msg = `POWER! ST ${b.you.st}`;
-  } else {
-    b.you.df = r10(b.you.df * 1.3);
-    b.msg = `GUARD! DF ${b.you.df}`;
-  }
+  const { msg, heal } = applyItem(b.you, kind);
+  b.msg = msg;
+  if (heal) b.anim = { target: 'you', text: `+${heal}`, shake: false };
   tune([[660, 0.05], [880, 0.08]]);
   save();
   endPlayerTurn();
